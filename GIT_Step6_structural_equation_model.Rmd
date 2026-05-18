@@ -1,0 +1,1062 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-05-18"
+---
+
+
+
+# SEM
+
+We will do a sequential structural equation model (SEM) to assess effectors of soil carbon stocks along the soil profile
+
+I will test with different microbial indicators: KEGG, CAZyme, and taxonomic (read-based) compositions, for all of which the first axis of PCoA will be used.
+
+# 1. Load data
+
+
+```{r}
+library('phyloseq')
+library("cowplot")
+library("dplyr")
+library("ggplot2")
+library("vegan")
+library("microbiome")
+library("tibble")
+library("readxl")
+library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(stringr)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer')
+
+# let's firs load KEGG data
+load(file = 'KOfam_metabolism_ps_COVERAGE_FINAL_PNSCO2')
+ps
+
+ps_RA <- transform(ps, "compositional")
+
+meta <- meta(ps)
+
+```
+
+
+## 1.1. remove forest
+
+```{r}
+# subset samples
+ps_RA <- subset_samples(ps_RA, sample_type != "forest")
+
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_RA),
+              MARGIN = ifelse(taxa_are_rows(ps_RA), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_RA = prune_taxa((prev0 > 0), ps_RA)
+ps_RA
+
+```
+
+
+```{r}
+ps_RA_KEGG <- ps_RA
+ps_RA_KEGG
+```
+
+
+
+
+```{r}
+setwd('C:\\Users\\lehakkin\\RStudio_computer')
+load(file = 'CAZyme_ps_COVERAGE_FINAL')#ps
+ps
+
+ps_CAZyme <- ps
+
+rm(ps)
+```
+
+
+
+CAZyme SUBSTRATES
+
+```{r}
+substrates <- read.csv2(file = "C:\\Users\\lehakkin\\RStudio_computer\\CAZyme_Substrates_from_Huan_et_al_2024.csv")
+tax <- as.data.frame(tax_table(ps_CAZyme))
+tax <- left_join(tax, substrates, by=c("enzyme"="CAZyme_family"))
+tax <- as.data.frame(tax)
+tax <- tax[, c(3:5, 1,2)]
+row.names(tax) <- tax$enzyme
+
+tax_table(ps_CAZyme) <- tax_table(as.matrix(tax))
+ps_CAZyme
+rank_names(ps_CAZyme)
+```
+
+
+```{r}
+
+# subset samples
+ps_CAZyme <- subset_samples(ps_CAZyme, sample_type != "forest")
+
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_CAZyme),
+              MARGIN = ifelse(taxa_are_rows(ps_CAZyme), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_CAZyme = prune_taxa((prev0 > 0), ps_CAZyme)
+ps_CAZyme
+
+ps_CAZyme_RA <- transform(ps_CAZyme, "compositional")
+
+```
+
+ either
+
+```{r}
+# Step 1: Aggregate to Substrate level
+ps_y <- aggregate_rare(ps_CAZyme_RA, level = "Substrate", detection = 0, prevalence = 0)
+
+```
+
+
+or!!!!!!!!!!
+
+```{r}
+#ps_y <- aggregate_rare(ps_CAZyme_RA, level = 'Derived', detection = 0/100, prevalence = 0/140)
+#ps_y
+```
+
+
+
+
+
+```{r}
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+```
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+
+
+
+```{r}
+#left join
+meta <- merge(metadata, gene_data, by=0, all.x=TRUE)
+```
+
+
+
+
+```{r}
+
+colnames(meta)[which(names(meta) == "pH_H2O")] <- "pH"
+colnames(meta)[which(names(meta) == "EC_uScm")] <- "EC"
+colnames(meta)[which(names(meta) == "C_g_per_kg")] <- "C"
+colnames(meta)[which(names(meta) == "N_gkg")] <- "N"
+colnames(meta)[which(names(meta) == "TP_gkg")] <- "P"
+colnames(meta)[which(names(meta) == "Alox_mmolkg")] <- "Al-ox"
+colnames(meta)[which(names(meta) == "Feox_mmolkg")] <- "Fe-ox"
+colnames(meta)[which(names(meta) == "oxides_mmolkg")] <- "Oxides"
+colnames(meta)[which(names(meta) == "PH2O_mgkg")] <- "P-H2O"
+colnames(meta)[which(names(meta) == "Porg_mgkg")] <- "P-org"
+colnames(meta)[which(names(meta) == "DOC_mgkg")] <- "DOC"
+colnames(meta)[which(names(meta) == "Pinorg_mgkg")] <- "P-inorg"
+colnames(meta)[which(names(meta) == "C_per_N")] <- "C/N"
+colnames(meta)[which(names(meta) == "log_root")] <- "Root biomass"
+colnames(meta)[which(names(meta) == "depth_numerical")] <- "Depth (numerical)"
+
+
+
+variables <- c("pH", "EC", "C", "N", "P", "Al-ox", "Fe-ox", "Oxides", "P-H2O", "P-org", "DOC", "P-inorg", "C/N", "Root biomass", "Depth (numerical)")
+
+```
+
+
+
+```{r}
+MyPalette2 <- c(forest = "#1167b1", Meadow = "#fbc02d", Organic = "#8a8a8a", Conventional =  "#b71c1c")
+
+meta$soil_layer <- meta$depth
+meta$soil_layer[meta$soil_layer=="0...10"]<- "0-10 cm"
+meta$soil_layer[meta$soil_layer=="10...20"]<- "10-20 cm"
+meta$soil_layer[meta$soil_layer=="20...30"]<- "20-30 cm"
+meta$soil_layer[meta$soil_layer=="30...40"]<- "30-40 cm"
+meta$soil_layer[meta$soil_layer=="40..."]<- "40-80 cm"
+
+
+#rename column by name
+colnames(meta)[colnames(meta) == 'sample_type'] <- 'treatment'
+
+# Convert factor to character
+meta$treatment <- as.character(meta$treatment)
+
+# Now do your replacements
+meta$treatment[meta$treatment == "meadow"] <- "Meadow"
+meta$treatment[meta$treatment == "organic"] <- "Organic"
+meta$treatment[meta$treatment == "conventional"] <- "Conventional"
+
+# Optional: Convert back to factor if needed
+meta$treatment <- factor(meta$treatment)
+
+meta$treatment <- factor(meta$treatment, levels = c("Meadow", "Organic", "Conventional"))
+
+```
+
+
+
+
+# 2. Extract PCoA axes
+
+```{r}
+# Save Bray-Curtis dissimilarity matrices as separate objects
+
+CAZyme_dist <- distance(ps_CAZyme_RA, method = "bray")
+KEGG_dist <- distance(ps_RA_KEGG, method = "bray")
+
+
+
+# Function to extract PCoA axes SEPARATELY
+extract_pcoa <- function(ps_object, prefix, n_axes = 3) {
+  dist_matrix <- distance(ps_object, method = "bray")
+  pcoa_result <- cmdscale(dist_matrix, k = n_axes, eig = TRUE)
+  axes <- as.data.frame(pcoa_result$points)
+  colnames(axes) <- paste0(prefix, "_PCoA", 1:n_axes)
+  return(axes)
+}
+
+# Extract PCoA axes for all communities SEPARATELY (using the same function)
+CAZyme_pcoa <- extract_pcoa(ps_CAZyme_RA, "CAZyme", n_axes = 3)
+KEGG_pcoa <- extract_pcoa(ps_RA_KEGG, "KEGG", n_axes = 3)
+
+
+# Prepare combined dataset
+combined_data <- meta %>%
+  # Bind microbiome data
+  bind_cols(CAZyme_pcoa, KEGG_pcoa) %>%
+  mutate(
+    # 1. TREATMENT as factor with Meadow as reference
+    treatment = factor(treatment, 
+                      levels = c("Meadow", "Organic", "Conventional")),
+    
+    # 2. Depth as numeric
+    depth_numeric = case_when(
+      depth == "0...10" ~ 5,
+      depth == "10...20" ~ 15,
+      depth == "20...30" ~ 25,
+      depth == "30...40" ~ 35,
+      depth == "40..." ~ 60,
+      TRUE ~ as.numeric(gsub("[^0-9]", "", depth))
+    ),
+    
+    # 3. Standardize soil properties and PCoA axes
+    across(c(C, pH, N, P, `Al-ox`, 
+             `Fe-ox`, `Root biomass`, `C/N`, EC, `P-org`, DOC),
+           ~ scale(.x)[,1], .names = "{.col}_z"),
+    
+    # 4. Standardize PCoA axes SEPARATELY
+    across(starts_with("CAZyme_"), ~ scale(.x)[,1], .names = "{.col}_z"),
+    across(starts_with("KEGG_"), ~ scale(.x)[,1], .names = "{.col}_z")
+  )
+
+# Check column names to confirm separation
+grep("CAZyme|KEGG", names(combined_data), value = TRUE)
+
+```
+
+
+
+
+
+# 3. SEM
+
+## 3.1.  piecewise SEM 
+
+Preliminary analysis revealed that CAZymes composition correlated with soil carbon stocks the most and is thus kept in the final SEM
+
+
+```{r}
+library(piecewiseSEM)
+
+df <- combined_data[, c("sampleID", "Depth (numerical)", "treatment", "C", "CAZyme_PCoA1", "KEGG_PCoA1", "pH","Al-ox", "Fe-ox", "Lignin", "Glucans", "Hemicellulose", "Chitin", "Root biomass")]
+colnames(df)[which(names(df) == "Al-ox")] <- "Al_ox"
+colnames(df)[which(names(df) == "Fe-ox")] <- "Fe_ox"
+colnames(df)[which(names(df) == "Root biomass")] <- "log_root"
+colnames(df)[which(names(df) == "Depth (numerical)")] <- "depth_numerical"
+
+
+#create dummy variables
+df$Conventional <- ifelse(df$treatment == 'Conventional', 1, 0)
+df$Organic <- ifelse(df$treatment == 'Organic', 1, 0)
+
+m.sem <- psem(
+  lm(pH ~ Organic + Conventional + depth_numerical, data = df),
+  lm(Al_ox ~ pH + Organic + Conventional + depth_numerical, data = df),
+  lm(Fe_ox ~ pH + Organic + Conventional, data = df),
+  lm(log_root ~ Organic + Conventional + depth_numerical, data = df),
+  lm(CAZyme_PCoA1 ~ depth_numerical + pH + Fe_ox, data = df),
+  lm(C ~ CAZyme_PCoA1 + depth_numerical + Al_ox + log_root, data = df),
+  data = df)
+
+summary(m.sem)
+```
+
+
+
+
+## 3.2.Check for Multicollinearity:
+
+
+Different predictors across models: Each equation in your SEM has different predictor sets, so VIF should be calculated separately for each model that has multiple predictors.!!!!!!!!!!
+
+
+
+```{r}
+# Quick check
+library(car)
+model1 <- lm(C ~ pH + `Fe-ox` + `Al-ox` + CAZyme_PCoA1 + `Root biomass`, data = df)
+vif(model1)
+```
+
+all VIFs below 10 (and mostly below 5), ok
+
+
+```{r}
+# Check each model with multiple predictors
+vif(lm(pH ~ Organic + Conventional + `Depth (numerical)`, data = df))
+vif(lm(`Al-ox` ~ pH + Organic + Conventional + `Depth (numerical)`, data = df))
+vif(lm(`Fe-ox` ~ pH + Organic + Conventional, data = df))
+vif(lm(`Root biomass` ~ Organic + Conventional + `Depth (numerical)`, data = df))
+vif(lm(CAZyme_PCoA1 ~ `Depth (numerical)` + pH + `Fe-ox`, data = df))
+vif(lm(C ~ CAZyme_PCoA1 + `Depth (numerical)` + `Al-ox` + `Root biomass`, data = df))
+```
+
+all below 10 (most below 5) here as well
+
+
+
+
+## 3.3. Consider Adding Correlated Errors (no need)
+
+Since we have good fit, this isn't necessary, but we could check:
+
+```{r}
+# If we wanted to allow correlated errors between certain variables
+colnames(df)[which(names(df) == "Al-ox")] <- "Al_ox"
+colnames(df)[which(names(df) == "Fe-ox")] <- "Fe_ox"
+colnames(df)[which(names(df) == "Root biomass")] <- "log_root"
+colnames(df)[which(names(df) == "Depth (numerical)")] <- "depth_numerical"
+
+m.sem2 <- psem(
+  lm(pH ~ Organic + Conventional + depth_numerical, data = df),
+  lm(Al_ox ~ pH + Organic + Conventional + depth_numerical, data = df),
+  lm(Fe_ox ~ pH + Organic + Conventional, data = df),
+  lm(log_root ~ Organic + Conventional + depth_numerical, data = df),
+  lm(CAZyme_PCoA1 ~ depth_numerical + pH + Fe_ox, data = df),
+  lm(C ~ CAZyme_PCoA1 + depth_numerical + Al_ox + log_root, data = df),
+  # Allow correlation between residuals
+  pH %~~% Fe_ox,
+  data = df)
+
+summary(m.sem2)
+```
+
+
+
+Perfect! Adding the correlated error didn't change the model - it's not significant (p = 0.2957) and AIC stayed the same. This confirms the original model (without correlated errors) is optimal.
+
+
+## 3.4. Effects graph
+
+
+
+lm(pH ~ Organic + Conventional + depth_numerical)
+
+lm(Al_ox ~ pH + Organic + Conventional + depth_numerical)
+
+lm(Fe_ox ~ pH + Organic + Conventional)
+
+lm(log_root ~ Organic + Conventional + depth_numerical)
+
+lm(CAZyme_PCoA1 ~ depth_numerical + pH + Fe_ox)
+
+lm(C ~ CAZyme_PCoA1 + depth_numerical + Al_ox + log_root)
+
+
+So direct paths to C are:
+
+CAZyme_PCoA1 → C
+depth → C
+Al_ox → C
+log_root → C
+
+
+#### 3.4.1. Extract standardized coefficients
+
+```{r}
+library(dplyr)
+
+std_coefs <- coefs(m.sem, standardize="scale")
+
+std_coefs <- std_coefs[,1:8]
+
+names(std_coefs) <- c(
+"Response",
+"Predictor",
+"Estimate",
+"Std.Error",
+"DF",
+"Crit.Value",
+"P.Value",
+"Std.Estimate"
+)
+
+get_coef <- function(resp, pred){
+
+  val <- std_coefs %>%
+    filter(Response==resp,
+           Predictor==pred) %>%
+    pull(Std.Estimate)
+
+  if(length(val)==0) return(0)
+
+  val
+}
+```
+
+
+#### 3.4.2. Define ALL valid indirect paths explicitly
+
+
+```{r}
+ind_org <- c(
+
+# root
+get_coef("log_root","Organic") *
+get_coef("C","log_root"),
+
+# Al paths
+get_coef("pH","Organic") *
+get_coef("Al_ox","pH") *
+get_coef("C","Al_ox"),
+
+get_coef("Al_ox","Organic") *
+get_coef("C","Al_ox"),
+
+# CAZyme paths
+get_coef("pH","Organic") *
+get_coef("CAZyme_PCoA1","pH") *
+get_coef("C","CAZyme_PCoA1"),
+
+get_coef("Fe_ox","Organic") *
+get_coef("CAZyme_PCoA1","Fe_ox") *
+get_coef("C","CAZyme_PCoA1"),
+
+get_coef("pH","Organic") *
+get_coef("Fe_ox","pH") *
+get_coef("CAZyme_PCoA1","Fe_ox") *
+get_coef("C","CAZyme_PCoA1")
+
+)
+
+indirect_Organic <- sum(ind_org)
+```
+
+
+
+```{r}
+ind_conv <- c(
+
+get_coef("log_root","Conventional") *
+get_coef("C","log_root"),
+
+get_coef("pH","Conventional") *
+get_coef("Al_ox","pH") *
+get_coef("C","Al_ox"),
+
+get_coef("Al_ox","Conventional") *
+get_coef("C","Al_ox"),
+
+get_coef("pH","Conventional") *
+get_coef("CAZyme_PCoA1","pH") *
+get_coef("C","CAZyme_PCoA1"),
+
+get_coef("Fe_ox","Conventional") *
+get_coef("CAZyme_PCoA1","Fe_ox") *
+get_coef("C","CAZyme_PCoA1"),
+
+get_coef("pH","Conventional") *
+get_coef("Fe_ox","pH") *
+get_coef("CAZyme_PCoA1","Fe_ox") *
+get_coef("C","CAZyme_PCoA1")
+
+)
+
+indirect_Conventional <- sum(ind_conv)
+```
+
+
+```{r}
+ind_depth <- c(
+
+get_coef("log_root","depth_numerical") *
+get_coef("C","log_root"),
+
+get_coef("pH","depth_numerical") *
+get_coef("Al_ox","pH") *
+get_coef("C","Al_ox"),
+
+get_coef("Al_ox","depth_numerical") *
+get_coef("C","Al_ox"),
+
+get_coef("depth_numerical","CAZyme_PCoA1") *
+get_coef("C","CAZyme_PCoA1"),
+
+get_coef("pH","depth_numerical") *
+get_coef("CAZyme_PCoA1","pH") *
+get_coef("C","CAZyme_PCoA1"),
+
+get_coef("pH","depth_numerical") *
+get_coef("Fe_ox","pH") *
+get_coef("CAZyme_PCoA1","Fe_ox") *
+get_coef("C","CAZyme_PCoA1")
+
+)
+
+indirect_depth <- sum(ind_depth)
+```
+
+
+```{r}
+ind_pH <- c(
+
+get_coef("Al_ox","pH") *
+get_coef("C","Al_ox"),
+
+get_coef("CAZyme_PCoA1","pH") *
+get_coef("C","CAZyme_PCoA1"),
+
+get_coef("Fe_ox","pH") *
+get_coef("CAZyme_PCoA1","Fe_ox") *
+get_coef("C","CAZyme_PCoA1")
+
+)
+
+indirect_pH <- sum(ind_pH)
+```
+
+
+```{r}
+indirect_Fe <-
+
+get_coef("CAZyme_PCoA1","Fe_ox") *
+get_coef("C","CAZyme_PCoA1")
+```
+
+
+#### 3.4.3. Direct effects
+
+```{r}
+direct_effects <- std_coefs %>%
+  filter(Response=="C") %>%
+  dplyr::select(Predictor,
+         Direct = Std.Estimate)
+```
+
+
+
+#### 3.4.4. Combine indirect + direct
+
+```{r}
+indirect_df <- data.frame(
+
+Predictor = c(
+"Organic",
+"Conventional",
+"depth_numerical",
+"pH",
+"Fe_ox"
+),
+
+Indirect = c(
+indirect_Organic,
+indirect_Conventional,
+indirect_depth,
+indirect_pH,
+indirect_Fe
+)
+
+)
+```
+
+
+#### 3.4.5. Total effects
+
+```{r}
+effects_all <- full_join(
+direct_effects,
+indirect_df,
+by="Predictor"
+)
+
+effects_all[is.na(effects_all)] <- 0
+
+effects_all <- effects_all %>%
+
+mutate(
+Total = Direct + Indirect
+)
+```
+
+
+
+
+#### 3.4.6. Plot Stacked diret and indirect effects
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Convert to long format
+effects_long <- effects_all %>%
+  
+  dplyr::select(Predictor, Direct, Indirect) %>%
+  
+  pivot_longer(
+    cols = c(Direct, Indirect),
+    names_to = "Effect_type",
+    values_to = "Value"
+  ) %>%
+  
+  mutate(
+    
+    Direction = ifelse(Value >= 0,
+                       "Positive",
+                       "Negative"),
+    
+    Fill_type = case_when(
+      Direction == "Positive" & Effect_type == "Direct"
+        ~ "Pos_Direct",
+      
+      Direction == "Positive" & Effect_type == "Indirect"
+        ~ "Pos_Indirect",
+      
+      Direction == "Negative" & Effect_type == "Direct"
+        ~ "Neg_Direct",
+      
+      Direction == "Negative" & Effect_type == "Indirect"
+        ~ "Neg_Indirect"
+    )
+    
+  )
+
+plot_total <- ggplot(
+  effects_long,
+  
+  aes(
+    x = reorder(Predictor, Value),
+    y = Value,
+    fill = Fill_type
+  )
+) +
+
+geom_bar(stat="identity") +
+
+coord_flip() +
+
+# Color system: red/blue + light/dark
+scale_fill_manual(
+  values = c(
+    
+    "Pos_Direct"   = "#0070C0",  # dark blue
+    "Pos_Indirect" = "#9DC3E6",  # light blue
+    
+    "Neg_Direct"   = "#C00000",  # dark red
+    "Neg_Indirect" = "#F4B6B6"   # light red
+    
+  ),
+  
+  labels = c(
+    "Pos_Direct" = "Direct (+)",
+    "Pos_Indirect" = "Indirect (+)",
+    "Neg_Direct" = "Direct (−)",
+    "Neg_Indirect" = "Indirect (−)"
+  )
+) +
+
+geom_hline(
+  yintercept=0,
+  linetype="dashed"
+) +
+
+labs(
+  y="Total standardized effects",
+  x=NULL,
+  fill=NULL
+) +
+
+theme_minimal() +
+
+theme(
+  plot.background = element_rect(fill="transparent", color=NA),
+  panel.background = element_rect(fill="transparent", color=NA),
+  legend.background = element_rect(fill="transparent", color=NA),
+  
+  legend.position = "top", 
+  legend.text = element_text(size=16),
+  
+  axis.text.x = element_text(size=16),
+  axis.text.y = element_text(size=16, color = "black"),
+  
+  axis.title.x = element_text(size=20),
+  axis.title.y = element_text(size=20)
+) +
+  guides(fill = guide_legend(nrow = 2)) +
+  
+# original label fixes
+scale_x_discrete(labels = function(x) {
+  x[x == "Fe_ox"] <- "Fe-ox"
+  x[x == "Al_ox"] <- "Al-ox"
+  x[x == "depth_numerical"] <- "Soil\ndepth"
+  x[x == "log_root"] <- "Root\nbiomass"
+  x[x == "CAZyme_PCoA1"] <- "CAZyme\nPCoA1"
+  x[x == "Organic"] <- "Organic\ntreatment"
+  x[x == "Conventional"] <- "Conventional\ntreatment"
+  x
+})
+
+plot_total
+```
+
+# 4. Figures
+
+
+```{r}
+MyPalette <- c(forest = "#1167b1", Meadow = "#fbc02d", Organic = "#8a8a8a", Conventional =  "#b71c1c")
+
+library("cowplot")
+
+```
+
+
+
+## 4.1. C in treatment layers
+
+```{r}
+C_g_per_kg <- meta %>%
+  group_by(treatment, `Depth (numerical)`) %>%
+  summarise(mean = mean(C, na.rm = TRUE), se = (sd(C, na.rm = TRUE)/sqrt(length((C))))) %>%
+  ungroup() %>%
+  ggplot(aes(y=mean, `Depth (numerical)`, color=treatment)) +
+  geom_line(linetype = "dashed") +
+  geom_point(size=2, position=position_dodge(1.5)) +
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.5, position=position_dodge(1.5)) + theme(plot.title = element_text(size = 20, hjust = 0.5)) + theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) + theme_cowplot() +
+  theme(axis.text = element_text(size=20),
+        axis.title = element_text(size=20),
+        legend.text = element_text(size=20),
+        legend.title = element_text(size=20),
+        title = element_text(size=20)) +
+  scale_y_continuous(name="C (g/kg)") + labs(x = NULL) + theme(legend.title = element_blank()) + scale_colour_manual(values = MyPalette2) + scale_x_reverse(breaks = c(60, 35, 25, 15, 5), labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")) + coord_flip()
+
+C_g_per_kg
+```
+
+
+
+
+
+```{r}
+
+p <- ggplot(meta, aes(y = C, 
+                      x = `Al-ox`, 
+                      color = treatment,    # color by treatment
+                      shape = depth)) +     # shape by depth
+  geom_point(alpha = 0.6, size = 2) +
+  geom_smooth(method = "lm", se = FALSE, aes(group = treatment)) +
+  theme_minimal() +
+  labs(y = "C", x = "Al-ox (mmol/kg)")
+
+p
+
+```
+
+
+
+```{r}
+
+p <- ggplot(meta, aes(y = C, 
+                      x = `Fe-ox`, 
+                      color = treatment,    # color by treatment
+                      shape = depth)) +     # shape by depth
+  geom_point(alpha = 0.6, size = 2) +
+  geom_smooth(method = "lm", se = FALSE, aes(group = treatment)) +
+  theme_minimal() +
+  labs(y = "C (g/kg)", y = "Fe-ox (mmol/kg)")
+
+p
+
+```
+
+
+
+
+# 5. CAZyme groups correlating with CAZyme_PCoA1
+
+
+```{r}
+# Load required libraries
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(forcats)
+
+# Step 1: Aggregate to Substrate level
+ps_Substrate <- aggregate_rare(ps_CAZyme_RA, level = "Substrate", detection = 0, prevalence = 0)
+
+# Step 2: Extract Substrate-level abundances
+otu_Substrate <- as.data.frame(otu_table(ps_Substrate))
+if(taxa_are_rows(ps_Substrate)) {
+  otu_Substrate <- as.data.frame(t(otu_Substrate))
+}
+
+# Step 3: Get Substrate names
+Substrate_names <- tax_table(ps_Substrate)[, "Substrate"]
+
+# Step 4: Get PCoA1 scores from your meta data
+pcoa1_scores <- df$CAZyme_PCoA1[match(rownames(otu_Substrate), df$sampleID)]
+
+# Step 5: Calculate correlations for each Substrate
+Substrate_correlations <- data.frame(
+  Substrate = Substrate_names,
+  correlation = NA,
+  p_value = NA
+)
+
+for(i in 1:ncol(otu_Substrate)) {
+  if(sd(otu_Substrate[, i]) > 0) {
+    test <- cor.test(pcoa1_scores, otu_Substrate[, i], method = "spearman")
+    Substrate_correlations$correlation[i] <- test$estimate
+    Substrate_correlations$p_value[i] <- test$p.value
+  }
+}
+
+# Step 6: Clean up and adjust p-values
+Substrate_correlations <- Substrate_correlations[!is.na(Substrate_correlations$correlation), ]
+Substrate_correlations$p_adjusted <- p.adjust(Substrate_correlations$p_value, method = "fdr")
+Substrate_correlations <- Substrate_correlations[order(-abs(Substrate_correlations$correlation)), ]
+
+# Step 7: Add significance stars
+Substrate_correlations <- Substrate_correlations %>%
+  mutate(
+    significance = case_when(
+      p_adjusted < 0.001 ~ "***",
+      p_adjusted < 0.01 ~ "**",
+      p_adjusted < 0.05 ~ "*",
+      p_adjusted < 0.1 ~ ".",
+      TRUE ~ ""
+    ),
+    Substrate = factor(Substrate, levels = Substrate[order(correlation)]),
+    direction = ifelse(correlation > 0, "Positive", "Negative")
+  )
+
+# View results
+print(Substrate_correlations)
+
+# Remove Unknown if present
+Substrate_correlations <- subset(Substrate_correlations, Substrate != "Unknown" & !is.na(Substrate))
+
+# Create the plot
+p4 <- ggplot(Substrate_correlations, aes(x = correlation, y = Substrate)) +
+  geom_col(width = 0.7, fill = "gray50") +  # Set a specific color for bars
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray30", size = 0.8) +
+  theme_minimal() +
+  labs(
+    x = "Spearman correlation with CAZyme PCoA1",
+    y = "CAZymes decomposing C derived from:",
+    title = NULL,
+    fill = "Direction"
+  ) +
+  theme(
+    axis.text.y = element_text(size = 14, face = "bold", color = "black"),  # Match bars
+    axis.text.x = element_text(size = 14),
+    axis.title.x = element_text(size = 14),
+    axis.title.y = element_text(size = 14, color = "black"),  # Match bars
+    plot.title = element_blank(),
+    legend.position = "none",
+    panel.grid.major.y = element_blank(),
+    plot.caption = element_text(hjust = 0, face = "italic", size = 10),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    panel.background = element_rect(fill = "transparent", color = NA)
+  ) +
+  # Add significance stars
+  geom_text(aes(label = significance, 
+                x = ifelse(correlation > 0, correlation + 0.03, correlation - 0.03)),
+            hjust = ifelse(Substrate_correlations$correlation > 0, 0, 1),
+            size = 6) +
+  scale_x_continuous(
+    limits = c(-1, 1),
+    breaks = seq(-1, 1, by = 0.2),
+    expand = c(0.02, 0.02)
+  ) + # Manually set the axis labels
+  scale_y_discrete(labels = c(
+    "Chitin" = "Chitin\n(fungal)",
+    "Peptidoglycan" = "Peptidoglycan\n(bacterial)",
+    "Cellulose" = "Cellulose\n(plant)",
+    "Hemicellulose" = "Hemicellulose\n(plant)",
+    "Glucans" = "Glucans\n(fungal)",
+    "Lignin" = "Lignin\n(plant")) 
+
+print(p4)
+
+
+```
+
+
+
+
+
+# 6. Correlations with C
+
+## 6.1. Root biomass
+
+```{r}
+library(ggpmisc)
+
+meta %>% 
+    ggplot(aes(x = `Root biomass`, y = C)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  # Adding the equation and R-squared value
+  stat_poly_eq(formula = y ~ x,
+               aes(label = paste(after_stat(eq.label), 
+                                 after_stat(rr.label), 
+                                 sep = "~~~")),
+               parse = TRUE) +
+   labs(x = "Root biomass (log10)",
+       y =  "C (g/kg)") +
+  theme_test()
+
+```
+
+
+## 6.2. Depth
+
+```{r}
+library(ggpmisc)
+
+meta %>% 
+   ggplot(aes(x = `Depth (numerical)`, y = C)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  # Adding the equation and R-squared value
+  stat_poly_eq(formula = y ~ x,
+               aes(label = paste(after_stat(eq.label), 
+                                 after_stat(rr.label), 
+                                 sep = "~~~")),
+               parse = TRUE) +
+   labs(x = "Depth",
+       y =  "C (g/kg)") +
+  theme_test()
+
+```
+
+
+
+## 6.3. Al-ox
+
+```{r}
+library(ggpmisc)
+
+meta %>% 
+  ggplot(aes(x = `Al-ox`, y = C)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  # Adding the equation and R-squared value
+  stat_poly_eq(formula = y ~ x,
+               aes(label = paste(after_stat(eq.label), 
+                                 after_stat(rr.label), 
+                                 sep = "~~~")),
+               parse = TRUE) +
+   labs(x = "Al-ox (mmol/kg)",
+       y =  "C (g/kg)") + 
+  theme_test()
+
+
+```
+
+
+
+
+## 6.3. CAZyme_PCoA1
+
+```{r}
+library(ggpmisc)
+
+df %>% 
+ ggplot(aes(x = CAZyme_PCoA1, y = C)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  # Adding the equation and R-squared value
+  stat_poly_eq(formula = y ~ x,
+               aes(label = paste(after_stat(eq.label), 
+                                 after_stat(rr.label), 
+                                 sep = "~~~")),
+               parse = TRUE) +
+   labs(x = "CAZyme PCoA1",
+       y =  "C (g/kg)") +
+  theme_test()
+
+```
+
+
+
+
+
+
+```{r}
+rm(list = ls())
+```
+
+
+
+

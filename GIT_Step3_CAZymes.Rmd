@@ -1,0 +1,3744 @@
+---
+title: "Untitled"
+output: html_document
+date: "2026-02-10"
+---
+
+
+
+
+
+
+# Contigs-based analysis of CAZyme genes
+
+
+
+# 1. Load data
+
+
+```{r}
+library('phyloseq')
+library("cowplot")
+library("dplyr")
+library("ggplot2")
+library("vegan")
+library("microbiome")
+library("tibble")
+library("readxl")
+library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(stringr)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer')
+
+load(file = 'CAZyme_ps_COVERAGE_FINAL')#ps
+ps
+
+meta <- meta(ps)
+```
+
+
+
+# 2. Heatmap of CAZymes
+
+
+
+I will do heatmap for CAZyme family RA values.
+
+For the final heatmap figure the RA values will be standardizes (z-transformed)
+
+First pick the 20 most abundant CAZyme family in each soil type depth
+
+Make a HEATMAP of the most abundant CAZyme family
+
+
+## 2.1.  Pick 20 most abund CAZymes in each soil management layer
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+CAZy_family <- aggregate_rare(ps_RA, level = 'enzyme', detection = 0/100, prevalence = 0/140)
+CAZy_family
+```
+
+
+
+```{r}
+# sample wise filtering according to most abund. genera
+
+# Initialize an empty list to store the taxa
+abund.taxa <- list()
+
+for (i in meta$sample_type) {
+  for (j in meta$depth) {
+    x <- sample_names(sample_data(CAZy_family)[sample_data(CAZy_family)$sample_type == i & sample_data(CAZy_family)$depth == j,])
+
+# Calculate taxa mean of the selected samples
+top20 <- head(sort(rowMeans(otu_table(CAZy_family)[,x]), decreasing = TRUE), 20)
+
+result_name <- paste("sample_type", i, "depth", j, sep = "_")
+
+abund.taxa[[result_name]] <- top20
+  }
+}
+
+```
+
+
+
+## 2.1. Combine picked taxa
+
+```{r}
+management_layer <- c(names(abund.taxa))
+
+all_top20 <- c()
+
+for (i in management_layer) {
+  top20 <- c(names(abund.taxa[[i]]))
+  all_top20 <- c(all_top20, top20)
+
+}
+
+all_top20_unique <- unique(all_top20)
+length(all_top20_unique)
+
+all_top20_unique_df <- as.data.frame(all_top20_unique)
+
+#setwd('C:\\Users\\lehakkin\\RStudio_computer')
+#write.csv2(all_top20_unique_df, file = "all_top20_CAZymes_unique.csv", row.names = FALSE)
+```
+
+After the filtering, there is 40 CAZyme families left out of the 295 in the beginning
+
+
+## 2.3. Make a phyloseq of picked taxa
+
+
+```{r}
+#setwd('C:\\Users\\lehakkin\\RStudio_computer')
+#all_top20_unique_df <- read.csv2(file = "all_top20_CAZymes_unique.csv")
+all_top20_unique <- unique(all_top20_unique_df$all_top20_unique)
+# filter by taxa name
+CAZy_family_pruned <- prune_taxa(all_top20_unique, CAZy_family)
+CAZy_family_pruned
+
+# make a tax file with the group still available that I'll need later
+tax_full <- as.data.frame(tax_table(ps_RA))
+##remove duplicate rows across family
+tax_full <- tax_full[!duplicated(tax_full[c('enzyme')]), ] 
+tax_subset <- as.data.frame(tax_table(CAZy_family_pruned))
+## combine these
+tax <- left_join(tax_subset, tax_full, by="enzyme")
+
+# remove extra
+rm(tax_full)
+rm(tax_subset)
+```
+
+
+## 2.4. MAKE HEATMAP figure
+
+Note! I will not do Z-transforming the data before plotting the heatmap. Instead I will do row scaling in the Pheatmap stage, which means that each gene's relative abundance is standardized
+
+```{r}
+meta <- meta(CAZy_family_pruned)
+meta$sample_type <- as.factor(meta$sample_type)
+meta$sample_type <- factor(meta$sample_type, levels=c('forest', 'meadow', 'organic', 'conventional'))
+
+meta$Depth <- gsub("...", "-", meta$depth, fixed = TRUE)
+
+meta$Depth[meta$Depth=="40-"] <- "40-80"
+
+
+meta$Depth[meta$Depth=="0-10"] <- "0-10 cm"
+meta$Depth[meta$Depth=="10-20"] <- "10-20 cm"
+meta$Depth[meta$Depth=="20-30"] <- "20-30 cm"
+meta$Depth[meta$Depth=="30-40"] <- "30-40 cm"
+meta$Depth[meta$Depth=="40-80"] <- "40-80 cm"
+
+# Z-transform
+#CAZy_family_pruned_z <- microbiome::transform(CAZy_family_pruned, 'Z', log10 = FALSE)
+CAZy_family_pruned_z <- CAZy_family_pruned
+
+data_subset <- as(otu_table(CAZy_family_pruned_z), "matrix")
+data_subset <- as.matrix(data_subset)
+
+# add annotations "Depth" and "Treatment"
+my_sample_col <- data.frame(meta[c("Depth", "sample_type")], row.names = row.names(meta))
+colnames(my_sample_col) <- c("Depth", "Treatment")
+
+
+x <- as.data.frame(t(data_subset))
+y <- as.data.frame(my_sample_col)
+colnames(y) <- c("Depth", "sample_type")
+z <- dplyr::left_join(rownames_to_column(x), rownames_to_column(y), by=c("rowname" = "rowname"))
+colnames(z)[1] <- "ID"
+
+# make into mean per treatment and soil layer
+f <- z %>%
+  group_by(sample_type, Depth) %>%
+  summarise_all(mean)
+
+# remove ID column
+f <- f[ , -3]
+
+# make new ID column, which is the soiltypedepth
+library(stringr)
+f$ID <- str_c(f$sample_type, '_', f$Depth)
+
+# make new df with just sample type, depth and sampletypedepth
+df <- f[c("sample_type", "Depth", "ID")]
+# remove extra columns from f
+f2 <- f[, -c(1, 2, 43)]
+# column into rownames
+rownames(f2) <- f$ID
+# make into numeric matrix
+f3 <- data.matrix(f2, rownames.force = NA)
+f4 <- t(f3)
+
+# same for df
+# remove extra columns from df
+df2 <- df[ , -c(3)]
+# column into rownames
+rownames(df2) <- df$ID
+my_sample_col2 <- df2
+my_sample_col3 <- as.data.frame(my_sample_col2)
+rownames(my_sample_col3) <- df$ID
+# lets add annotations of samples
+
+# add annotations "Depth" and "soil_type" and change order
+colnames(my_sample_col3) <- c("Treatment", "Depth")
+my_sample_col3 <- my_sample_col3[, c(2,1)]
+```
+
+
+
+```{r}
+library("pheatmap")
+library("ggplotify")
+
+# Create color palette
+my_colour <- list(
+  Treatment = c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional = "#b71c1c"),
+  Depth = c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA", '30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+)
+
+# Add gap between sample_types
+gp_col <- which(diff(as.numeric(factor(my_sample_col3$Treatment))) != 0)
+
+# Order the tax table - first by family, then by family (both alphabetically)
+tax <- tax[order(tax$family, tax$enzyme), ]
+rownames(tax) <- tax$enzyme
+
+# Reorder f4 to match the sorted tax table
+f4 <- f4[rownames(tax), ]
+
+# Find where family changes occur (for gaps)
+gp_row <- which(diff(as.numeric(factor(tax$family))) != 0)
+
+# Create the heatmap plot
+p2 <- as.ggplot(function() {
+  pheatmap(
+    f4,
+    cluster_cols = FALSE,
+    cluster_rows = FALSE,
+    annotation_col = my_sample_col3,
+    annotation_colors = my_colour,
+    gaps_col = gp_col,
+    gaps_row = gp_row,
+    color = colorRampPalette(c("navy", "white", "red"))(50),
+    show_colnames = FALSE,
+    legend = TRUE,
+    border_color = NA,
+    cellheight = 16,
+    fontsize = 14,
+    fontsize_row = 14,
+    annotation_names_row = FALSE,
+    annotation_names_col = FALSE,
+    scale = "row"
+  )
+})
+
+print(p2)
+```
+
+
+
+
+
+
+# 3.Heatmap of CAZyme classes
+
+
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+CAZy_family <- aggregate_rare(ps_RA, level = 'family', detection = 0/100, prevalence = 0/140)
+CAZy_family
+```
+
+Now no need to filter anything
+
+
+
+Note! I will not do Z-transforming the data before plotting the heatmap. Instead I will do row scaling in the Pheatmap stage, which means that each gene's relative abundance is standardized
+
+```{r}
+meta <- meta(CAZy_family)
+meta$sample_type <- as.factor(meta$sample_type)
+meta$sample_type <- factor(meta$sample_type, levels=c('forest', 'meadow', 'organic', 'conventional'))
+
+meta$Depth <- gsub("...", "-", meta$depth, fixed = TRUE)
+
+meta$Depth[meta$Depth=="40-"] <- "40-80"
+
+
+meta$Depth[meta$Depth=="0-10"] <- "0-10 cm"
+meta$Depth[meta$Depth=="10-20"] <- "10-20 cm"
+meta$Depth[meta$Depth=="20-30"] <- "20-30 cm"
+meta$Depth[meta$Depth=="30-40"] <- "30-40 cm"
+meta$Depth[meta$Depth=="40-80"] <- "40-80 cm"
+
+# Z-transform
+#CAZy_family_pruned_z <- microbiome::transform(CAZy_family_pruned, 'Z', log10 = FALSE)
+CAZy_family_pruned_z <- CAZy_family
+
+data_subset <- as(otu_table(CAZy_family_pruned_z), "matrix")
+data_subset <- as.matrix(data_subset)
+
+# add annotations "Depth" and "Treatment"
+my_sample_col <- data.frame(meta[c("Depth", "sample_type")], row.names = row.names(meta))
+colnames(my_sample_col) <- c("Depth", "Treatment")
+
+
+x <- as.data.frame(t(data_subset))
+y <- as.data.frame(my_sample_col)
+colnames(y) <- c("Depth", "sample_type")
+z <- dplyr::left_join(rownames_to_column(x), rownames_to_column(y), by=c("rowname" = "rowname"))
+colnames(z)[1] <- "ID"
+
+# make into mean per treatment and soil layer
+f <- z %>%
+  group_by(sample_type, Depth) %>%
+  summarise_all(mean)
+
+# remove ID column
+f <- f[ , -3]
+
+# make new ID column, which is the soiltypedepth
+library(stringr)
+f$ID <- str_c(f$sample_type, '_', f$Depth)
+
+# make new df with just sample type, depth and sampletypedepth
+df <- f[c("sample_type", "Depth", "ID")]
+# remove extra columns from f
+f2 <- f[, -c(1, 2, 11)]
+# column into rownames
+rownames(f2) <- f$ID
+# make into numeric matrix
+f3 <- data.matrix(f2, rownames.force = NA)
+f4 <- t(f3)
+
+# same for df
+# remove extra columns from df
+df2 <- df[ , -c(3)]
+# column into rownames
+rownames(df2) <- df$ID
+my_sample_col2 <- df2
+my_sample_col3 <- as.data.frame(my_sample_col2)
+rownames(my_sample_col3) <- df$ID
+# lets add annotations of samples
+
+# add annotations "Depth" and "soil_type" and change order
+colnames(my_sample_col3) <- c("Treatment", "Depth")
+my_sample_col3 <- my_sample_col3[, c(2,1)]
+```
+
+
+
+```{r}
+library("pheatmap")
+library("ggplotify")
+
+# Create color palette
+my_colour <- list(
+  Treatment = c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional = "#b71c1c"),
+  Depth = c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA", '30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+)
+
+# Add gap between sample_types
+gp_col <- which(diff(as.numeric(factor(my_sample_col3$Treatment))) != 0)
+
+# Order the tax table - first by family, then by family (both alphabetically)
+tax <- as.data.frame(tax_table(CAZy_family))
+#tax <- tax[order(tax$family, tax$family), ]
+#rownames(tax) <- tax$family
+
+# Reorder f4 to match the sorted tax table
+f4 <- f4[rownames(tax), ]
+
+# Find where family changes occur (for gaps)
+gp_row <- which(diff(as.numeric(factor(tax$family))) != 0)
+
+# Create the heatmap plot
+p2 <- as.ggplot(function() {
+  pheatmap(
+    f4,
+    cluster_cols = FALSE,
+    cluster_rows = TRUE,
+    annotation_col = my_sample_col3,
+    annotation_colors = my_colour,
+    gaps_col = gp_col,
+    #gaps_row = gp_row,
+    color = colorRampPalette(c("navy", "white", "red"))(50),
+    show_colnames = FALSE,
+    legend = TRUE,
+    border_color = NA,
+    cellheight = 16,
+    fontsize = 14,
+    fontsize_row = 14,
+    annotation_names_row = FALSE,
+    annotation_names_col = FALSE,
+    scale = "row"
+  )
+})
+
+print(p2)
+```
+
+
+
+# 4. PCoA for CAZymes
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+ps_x <- aggregate_rare(ps_RA, , level = 'enzyme',
+    detection = 0/100, prevalence = 0/140)
+
+ps_x
+```
+
+
+
+```{r}
+otu = as(otu_table(ps_x), "matrix")
+# transpose if necessary
+if(taxa_are_rows(ps_x)){otu <- t(otu)}
+# Coerce to data.frame
+otu = as.data.frame(otu)
+otu <- otu %>% replace(is.na(.), 0)
+otu <- as.matrix(otu)
+
+bray_dist <- vegan::vegdist(otu, method="bray")
+str(bray_dist)
+
+# use k = 3 so we'll get calculations for three axes
+pcoa <- cmdscale(bray_dist, eig=TRUE, k = 3)
+ordiplot(scores(pcoa),display="sites", type="points")
+```
+
+
+Let's first make PCoA ordination with axes 1 and 2
+
+
+Env. variables
+
+```{r}
+# Post-Hoc Projections of environmental variables
+# envfit in vegan projects points onto vectors that have maximum correlation with corresponding environmental variables
+pcoa.env12 <- envfit(pcoa, meta[ ,c("pH_H2O", "EC_uScm", "C_g_per_kg", "N_gkg", "TP_gkg", "sample_type", "depth_numerical", "DOC_mgkg", "Pinorg_mgkg", "Porg_mgkg", "log_root", "C_per_N", "Feox_mmolkg", "Alox_mmolkg", "oxides_mmolkg", "PH2O_mgkg")], na.rm = TRUE, choices=c(1:2), permutations = 999)
+
+
+# main effects
+pcoa.env12
+
+ef12.adj <- pcoa.env12
+pvals.adj <- p.adjust (pcoa.env12$vectors$pvals, method = 'bonferroni')
+ef12.adj$vectors$pvals <- pvals.adj
+ef12.adj
+
+```
+
+
+To plot (classical) mds (which is equivalent to PCoA) with ggplot a new datasheet needs to be created which contains the x,y points for each site. You can do this by calling the scores of you mds.
+
+
+```{r}
+site.scrs <- as.data.frame(scores(pcoa, display = "sites")) #save pcoa results into dataframe
+site.scrs <- cbind(site.scrs, soil_type = meta$sample_type) #add grouping variable "soil_type" to dataframe
+site.scrs <- cbind(site.scrs, depth = meta$depth) #add grouping variable of depth
+
+head(site.scrs)
+```
+
+
+I will be following somewhat this tutorial for fitting the environmental variables etc:
+
+[jkzorz github](https://jkzorz.github.io/2020/04/04/NMDS-extras.html)
+
+To show environmental extrinsic variables another datasheet needs to be created
+
+Citation from the [jkzorz github](https://jkzorz.github.io/2020/04/04/NMDS-extras.html)
+
+*"Extracting the required information from the envfit result is a bit more complicated. The envfit output contains information on the length of the segments for each variable. The segments are scaled to the r2 value, so that the environmental variables with a longer segment are more strongly correlated with the data than those with a shorter segment. You can extract this information with scores. Then these lengths are further scaled to fit the plot. This is done with a multiplier that is analysis specific, and can be accessed using the command ordiArrowMul(en). Below I multiply the scores by this multiplier to keep the coordinates in the correct proportion."*
+
+Because my data contained continuous and categorical environmental variables, Im extracting the information from both separately using the vectors and factors options respectively.
+
+
+Categorial and continuous variables
+
+```{r}
+
+# first categorial variables
+env.scores_cat12 <- as.data.frame(scores(pcoa.env12, display = "factors"))*0.25 # multiply the envfit scores to keep them in the frame of the ordination
+env.scores_cat12 <- cbind(env.scores_cat12, env.variables = rownames(env.scores_cat12)) #and then gives them their names
+
+env.scores_cat12 <- cbind(env.scores_cat12, pval = pcoa.env12$factors$pvals) # add pvalues to dataframe
+sig.env.scores_cat12 <- subset(env.scores_cat12, pval<=0.05) #subset data to show variables significant at 0.05
+sig.env.scores_cat12
+# all were significant
+
+
+# then continous variables
+env.scores_cont12 <- as.data.frame(scores(pcoa.env12, display = "vectors"))*0.25 # multiply the envfit scores to keep them in the frame of the ordination
+env.scores_cont12 <- cbind(env.scores_cont12, env.variables = rownames(env.scores_cont12)) #and then gives them their names
+
+env.scores_cont12 <- cbind(env.scores_cont12, pval = pcoa.env12$vectors$pvals) # add pvalues to dataframe
+sig.env.scores_cont12 <- subset(env.scores_cont12, pval<=0.05) #subset data to show variables significant at 0.05
+sig.env.scores_cont12
+# all were significant
+```
+
+
+Now we have the relevant information for plotting the ordination in ggplot
+
+
+```{r}
+MyPalette <- c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c")
+
+site.scrs$new_depth <- site.scrs$depth
+
+site.scrs$new_depth <- gsub("...", "-", site.scrs$new_depth, fixed = TRUE)
+
+site.scrs$new_depth[site.scrs$new_depth=="40-"] <- "40-80"
+
+site.scrs$new_depth[site.scrs$new_depth=="0-10"] <- "0-10 cm"
+site.scrs$new_depth[site.scrs$new_depth=="10-20"] <- "10-20 cm"
+site.scrs$new_depth[site.scrs$new_depth=="20-30"] <- "20-30 cm"
+site.scrs$new_depth[site.scrs$new_depth=="30-40"] <- "30-40 cm"
+site.scrs$new_depth[site.scrs$new_depth=="40-80"] <- "40-80 cm"
+```
+
+
+Get axis %
+
+```{r}
+#First lets run the PCoA with phyloseq to get the axis percentages (plot_ordination gives axis percentages)
+
+GP.ord <- ordinate(ps_x, "PCoA", "bray")
+p2 = plot_ordination(ps_x, GP.ord, type="samples", color="sample_type", shape="depth")
+p2
+```
+
+Remember to change the axis percentages accordingly below!!!
+
+Plot
+
+
+```{r}
+pcoa.plot <- ggplot() + geom_point(data=site.scrs, aes(Dim1, Dim2, colour = factor(site.scrs$soil_type), shape = factor(site.scrs$new_depth)), size = 6, alpha = 0.6, stroke = 1.5) + theme_cowplot() + theme(panel.background = element_rect(fill = NA, colour = "black", size = 1, linetype = "solid")) + labs(colour = "", shape = "") + theme(legend.text = element_text(size = 12), axis.text = element_text(size = 16)) + scale_colour_manual(values = MyPalette) + labs(y = "PCoA2 (14.5%)", x = "PCoA1 (29.6%)")
+
+
+pcoa.plot
+
+```
+
+Add env. variables to the PCoA
+
+First, simplify the names
+
+
+```{r}
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "pH_H2O"] <- "pH"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "C_g_per_kg"] <- "C"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "N_gkg"] <- "N"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "TP_gkg"] <- "P-tot"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "depth_numerical"] <- "Depth"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "DOC_mgkg"] <- "DOC"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "Porg_mgkg"] <- "P-org"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "log_root"] <- "log root"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "C_per_N"] <- "C/N"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "Feox_mmolkg"] <- "Fe-ox"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "Alox_mmolkg"] <- "Al-ox"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "depth"] <- "Depth"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "log root"] <- "Root biomass"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "S_mg_per_kg"] <- "S"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "Mn_mg_per_kg"] <- "Mn"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "PH2O_mgkg"] <- "P-H2O"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "POM_C_percent"] <- "POM-C"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "MAOM_C_percent"] <- "MAOM-C"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "oxides_mmolkg"] <- "Oxides"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "EC_uScm"] <- "EC"
+```
+
+
+
+
+...then plot
+
+```{r fig.dim = c(12, 12)}
+p1 <- pcoa.plot +
+  geom_segment(aes(x = 0, y = 0, xend = Dim1, yend = Dim2), data = sig.env.scores_cont12, size =1, alpha = 0.3, colour = "grey30") + ggrepel::geom_text_repel(data = sig.env.scores_cont12, aes(x = Dim1, y = Dim2), colour = "blue", fontface = "bold", label = sig.env.scores_cont12$env.variables, segment.size = 0.2, box.padding = unit(0.1, "lines"), point.padding = (0.1), force = 1, max.time = 30, nudge_y = 0.00, nudge_x = 0.00) + theme(legend.position = "right", legend.text = element_text(size = 12))
+
+p1
+```
+
+
+
+
+
+
+# 5. PERMANOVA
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+ps_x <- aggregate_rare(ps_RA, , level = 'enzyme',
+    detection = 0/100, prevalence = 0/140)
+
+ps_x
+```
+
+
+Calculate Bray-Curtis (dis)similarities
+
+```{r}
+ps_RA_bray <- phyloseq::distance(ps_x, method = "bray")
+```
+
+
+Homogenity of variances
+
+Check that variance homogeneity assumptions hold (to ensure the reliability of the results). If  groups have signif. different spreads the permanova result may be potentially explained by that, rtaher than the groups.
+
+Betadisper first calculates the average distance of group members to the group centroid in multivariate space (generated by a distance matrix). Then, an ANOVA is done to test if the dispersions (variances) of groups are different.
+
+
+for management type
+
+```{r}
+anova(betadisper(ps_RA_bray, meta$sample_type))
+```
+         
+
+We see that the ANOVA p-value is not significant meaning that the **homogeneity of variance assumption is met**
+
+
+for depth
+
+```{r}
+anova(betadisper(ps_RA_bray, meta$depth))
+```
+
+We see that the ANOVA p-value is  significant meaning that **homogeneity of variance assumption is *NOT* met**
+
+post hoc
+
+I'll do post hoc analysis with Tukey's test to see which groups differ in relation to their variances
+
+```{r}
+TukeyHSD(betadisper(ps_RA_bray, meta$depth))
+```
+
+Dispersions differ significantly between the deepest layer and the ones above it
+
+
+## 5.1. Initial PERMANOVAs
+
+
+First, I will do PERMANOVA so that I include all management types (later without forest)
+
+
+```{r}
+# first with just soil type and strata option
+adonis2(formula = ps_RA_bray~ sample_type, data = meta, permutations = 999, method = "bray", by = "margin", strata = meta$depth)
+```
+
+ treatment is significant
+
+
+Depth
+
+```{r}
+# first with just soil type and strata option
+adonis2(formula = ps_RA_bray~ depth, data = meta, permutations = 999, method = "bray", by = "margin", strata = meta$sample_type)
+```
+
+With P value = 1e-04, the soil layer is significant and R2 value indicated 29% variance explanation
+
+
+## 5.2. Final PERMANOVA
+
+
+```{r}
+set.seed(1)
+final <- adonis2(formula = ps_RA_bray ~depth * sample_type, data = meta, permutations = 9999, method = "bray", by = "terms")
+final
+```
+
+
+# 6. Add PERMANOVA results to PCoA
+
+
+
+```{r}
+library(ggpubr) ## for getting stat_regline_equation
+library("ggpmisc")
+
+p <- p1 + 
+  annotate(
+    geom = "text",
+    x = -0.25,
+    y = 0.28,
+    label = "PERMANOVA\nSoil layer:Treatment: R²=0.09; p=0.042 \nSoil layer: R²=0.29; p<0.001\nTreatment: R²=0.05; p<0.001\nModel R²=0.42",
+    hjust = 0,
+    size = 4  # Increase this value until text matches your desired size (default is 3.88)
+  )
+
+p
+```
+
+
+
+# 7. Differential abundance analysis: MaAsLin2
+
+
+## 7.1. CAZyme enzymes
+
+
+MaAsLin2 (Microbiome Multivariate Analysis)
+Handles relative abundance data.
+
+Works with generalized linear models (GLMs).
+
+
+I will be using the top 20 treatment-soil-layer CAZymes only, use the coverage clr-transformed RA-values 
+
+I will not be using the forest due to too few replicates
+
+
+
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+ps_x <- aggregate_rare(ps_RA, level = 'enzyme', detection = 0/100, prevalence = 0/140)
+ps_x
+
+#setwd('C:\\Users\\lehakkin\\RStudio_computer')
+#all_top20_unique_df <- read.csv2(file = "all_top20_CAZymes_unique.csv")
+all_top20_unique <- unique(all_top20_unique_df$all_top20_unique)
+
+ps_x <- prune_taxa(all_top20_unique, ps_x)
+ps_x
+
+tax <- as.data.frame(tax_table(ps_x))
+```
+
+### 7.1.1. With meadow
+
+```{r}
+#To remove those from your phyloseq object
+ps_x <- subset_samples(ps_x, sample_type!="forest")
+#This will return a ps object with the samples removed
+ps_x
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_x),
+              MARGIN = ifelse(taxa_are_rows(ps_x), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_x = prune_taxa((prev0 > 0), ps_x)
+ps_x
+
+```
+
+
+
+```{r}
+# Run MaAsLin2
+library(Maaslin2)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer\\GENE_MaAsLin2\\CAZyme_enzyme')
+
+
+# Make input_data
+## input_data = dataframe where named gene_data where rows = samples and columns = genes
+## input_metadata = dataframe here named metadata)
+
+
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_x))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_x)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+#fit_data <- Maaslin2(
+#  input_data = gene_data,
+#  input_metadata = metadata,
+#  output = "Treatment_Layer_WITH_MEADOW",
+#  fixed_effects = c('Layer', 'Treatment'), # my grouping variable(s)
+#  normalization = "NONE",          # Use CLR for relative abundances
+#  transform = "NONE",             # No extra transform (data is already proportional)
+#  analysis_method = "CPLM", #DEFAULT:
+#  correction = "BH",               # Benjamini-Hochberg FDR correction
+#  plot_heatmap = TRUE,
+#  reference = 'Treatment,Meadow')
+
+```
+
+
+
+### 7.1.2.Without meadow
+
+
+```{r}
+#To remove those from your phyloseq object
+ps_x <- subset_samples(ps_x, sample_type!="forest" & sample_type!="meadow")
+#This will return a ps object with the samples removed
+ps_x
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_x),
+              MARGIN = ifelse(taxa_are_rows(ps_x), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_x = prune_taxa((prev0 > 0), ps_x)
+ps_x
+
+```
+
+
+
+```{r}
+# Run MaAsLin2
+library(Maaslin2)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer\\GENE_MaAsLin2\\CAZyme_enzyme')
+
+
+# Make input_data
+## input_data = dataframe where named gene_data where rows = samples and columns = genes
+## input_metadata = dataframe here named metadata)
+
+
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_x))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_x)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+#fit_data <- Maaslin2(
+#  input_data = gene_data,
+#  input_metadata = metadata,
+#  output = "Treatment_Layer_WO_MEADOW",
+#  fixed_effects = c('Layer', 'Treatment'), # my grouping variable(s)
+#  normalization = "NONE",          # Use CLR for relative abundances
+#  transform = "NONE",             # No extra transform (data is already proportional)
+#  analysis_method = "CPLM", #DEFAULT:
+#  correction = "BH",               # Benjamini-Hochberg FDR correction
+#  plot_heatmap = TRUE,
+#  reference = 'Treatment,Conventional')
+
+```
+
+
+
+## 7.2. CAZyme classes
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+ps_x <- aggregate_rare(ps_RA, level = 'family', detection = 0/100, prevalence = 0/140)
+ps_x
+
+
+tax <- as.data.frame(tax_table(ps_x))
+```
+
+
+### 7.2.1. With meadow
+
+
+
+```{r}
+#To remove those from your phyloseq object
+ps_x <- subset_samples(ps_x, sample_type!="forest")
+#This will return a ps object with the samples removed
+ps_x
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_x),
+              MARGIN = ifelse(taxa_are_rows(ps_x), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_x = prune_taxa((prev0 > 0), ps_x)
+ps_x
+
+```
+
+
+```{r}
+# Run MaAsLin2
+library(Maaslin2)
+
+# Make input_data
+## input_data = dataframe where named gene_data where rows = samples and columns = genes
+## input_metadata = dataframe here named metadata)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer\\GENE_MaAsLin2\\CAZyme_Family')
+
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_x))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_x)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+#fit_data <- Maaslin2(
+#  input_data = gene_data,
+#  input_metadata = metadata,
+#  output = "Treatment_Layer_With_Meadow",
+#  fixed_effects = c('Layer', 'Treatment'), # my grouping variable(s)
+#  normalization = "NONE",          # Use CLR for relative abundances
+#  transform = "NONE",             # No extra transform (data is already proportional)
+#  analysis_method = "CPLM", #DEFAULT:
+#  correction = "BH",               # Benjamini-Hochberg FDR correction
+#  plot_heatmap = TRUE,
+#  reference = 'Treatment,Meadow')
+
+```
+
+
+
+
+### 7.2.2. Without meadow
+
+
+
+```{r}
+#To remove those from your phyloseq object
+ps_x <- subset_samples(ps_x, sample_type!="forest" & sample_type!="meadow")
+#This will return a ps object with the samples removed
+ps_x
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_x),
+              MARGIN = ifelse(taxa_are_rows(ps_x), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_x = prune_taxa((prev0 > 0), ps_x)
+ps_x
+
+```
+
+
+```{r}
+# Run MaAsLin2
+library(Maaslin2)
+
+# Make input_data
+## input_data = dataframe where named gene_data where rows = samples and columns = genes
+## input_metadata = dataframe here named metadata)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer\\GENE_MaAsLin2\\CAZyme_Family')
+
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_x))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_x)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+#fit_data <- Maaslin2(
+#  input_data = gene_data,
+#  input_metadata = metadata,
+#  output = "Treatment_Layer_WO_Meadow",
+#  fixed_effects = c('Layer', 'Treatment'), # my grouping variable(s)
+#  normalization = "NONE",          # Use CLR for relative abundances
+#  transform = "NONE",             # No extra transform (data is already proportional)
+#  analysis_method = "CPLM", #DEFAULT:
+#  correction = "BH",               # Benjamini-Hochberg FDR correction
+#  plot_heatmap = TRUE,
+#  reference = 'Treatment,Conventional')
+
+```
+
+
+
+
+
+# 8. Figures: boxplots
+
+
+
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+ps_x <- aggregate_rare(ps_RA, level = 'family', detection = 0/100, prevalence = 0/140)
+ps_x
+
+
+tax <- as.data.frame(tax_table(ps_x))
+
+meta <- meta(ps)
+
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+sample_data(ps_x) <- sample_data(meta)
+
+ps_x
+```
+
+
+
+```{r}
+ps_y <- ps_x
+```
+
+
+
+```{r}
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+```
+
+```{r}
+names(gene_data)
+```
+
+## 8.1. AA
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+AA <- ggplot(df, aes(x = Layer, y = AA, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "AA") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+AA
+
+```
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+## 8.2. CBM
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+CBM <- ggplot(df, aes(x = Layer, y = CBM, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "CBM") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+CBM
+
+```
+
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+## 8.3. CE
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+CE <- ggplot(df, aes(x = Layer, y = CE, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "CE") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+CE
+
+```
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+## 8.4. cohesin
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+cohesin <- ggplot(df, aes(x = Layer, y = cohesin, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "Cohesin") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+cohesin
+
+```
+
+
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+## 8.5. GH
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+GH <- ggplot(df, aes(x = Layer, y = GH, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "GH") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+GH
+
+```
+
+
+
+
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+## 8.6. GT
+
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+GT <- ggplot(df, aes(x = Layer, y = GT, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "GT") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+GT
+
+```
+
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+## 8.7.PL
+
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+PL <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+PL <- ggplot(df, aes(x = Layer, y = PL, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "PL") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+PL
+
+```
+
+
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+## 8.8. SLH
+
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+SLH <- ggplot(df, aes(x = Layer, y = SLH, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "SLH") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+SLH
+
+```
+
+
+
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+
+
+# 9. CAZyme PLant vs Microbial SUBSTRATES
+
+```{r}
+substrates <- read.csv2(file = "C:\\Users\\lehakkin\\RStudio_computer\\CAZyme_Substrates_from_Huan_et_al_2024.csv")
+tax <- as.data.frame(tax_table(ps))
+tax <- left_join(tax, substrates, by=c("enzyme"="CAZyme_family"))
+tax <- as.data.frame(tax)
+tax <- tax[, c(3:5, 1,2)]
+row.names(tax) <- tax$enzyme
+
+tax_table(ps) <- tax_table(as.matrix(tax))
+ps
+rank_names(ps)
+```
+
+## 9.1. Figures
+
+
+Plant and Microbial derived C decomposing
+
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+ps_x <- aggregate_rare(ps_RA, level = 'Derived', detection = 0/100, prevalence = 0/140)
+ps_x
+
+
+tax <- as.data.frame(tax_table(ps_x))
+
+meta <- meta(ps)
+
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+sample_data(ps_x) <- sample_data(meta)
+
+ps_x
+```
+
+
+
+```{r}
+ps_y <- ps_x
+```
+
+
+
+```{r}
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+```
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+Microbial <- ggplot(df, aes(x = Layer, y = Microbial, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "Microbial-derived C\ndecomposing CAZymes") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+Microbial
+
+```
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+Plant <- ggplot(df, aes(x = Layer, y = Plant, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "Plant-derived C\ndecomposing CAZymes") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+Plant
+
+```
+
+
+
+## 9.2. Test
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+ps_x <- aggregate_rare(ps_RA, level = 'Derived', detection = 0/100, prevalence = 0/140)
+ps_x
+
+
+tax <- as.data.frame(tax_table(ps_x))
+
+meta <- meta(ps)
+
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+sample_data(ps_x) <- sample_data(meta)
+
+ps_x
+```
+
+
+Treatment in ecah soil layer separately
+
+
+```{r}
+ps_y <- subset_samples(ps_x, depth=="20...30")
+ps_y
+```
+
+
+```{r}
+library(car)
+
+x_df <- psmelt(ps_y)
+
+taxa <- unique(x_df$OTU)
+
+for (i in taxa) {
+ df <- filter(x_df, OTU == i)
+ print(i)
+ # Using leveneTest()
+result = leveneTest(Abundance ~ sample_type, df)
+# print the result
+print(result)
+
+}
+
+x <- x_df %>%
+  filter(OTU %in% taxa) %>% group_by(OTU, sample_type) %>% summarise(mean = mean(Abundance, na.rm = TRUE), se = (sd(Abundance, na.rm = TRUE)/sqrt(length((Abundance)))))
+print(x)
+
+```
+
+All are homogenic
+
+
+```{r}
+y_df <- psmelt(ps_x)
+x <- y_df %>%
+  group_by(OTU, sample_type, depth) %>% summarise(mean = round(mean(Abundance, na.rm = TRUE)*100,1), se = round((sd(Abundance, na.rm = TRUE)/sqrt(length((Abundance)))) * 100,1))
+x <- subset(x, OTU!="Unknown")
+print(x)
+
+```
+
+
+Parametric test
+
+all the layers:
+
+```{r}
+library(multcomp)
+library(car)
+library(dplyr)
+
+# 1. Create summary table
+y_df <- psmelt(ps_x)
+x <- y_df %>%
+  group_by(OTU, sample_type, depth) %>% 
+  summarise(
+    mean = round(mean(Abundance, na.rm = TRUE) * 100, 1), 
+    se = round((sd(Abundance, na.rm = TRUE) / sqrt(n())) * 100, 1),
+    .groups = 'drop'
+  )
+
+# Remove Unknown OTU
+x <- subset(x, OTU != "Unknown")
+
+# Combine mean and se
+x <- x %>%
+  mutate(mean_se = paste0(mean, " ± ", se)) %>%
+  dplyr::select(-mean, -se)
+
+# 2. Get data for tests
+x_df <- psmelt(ps_x)
+x_df$OTU <- as.factor(x_df$OTU)
+x_df <- subset(x_df, OTU != "Unknown")
+
+# 3. FIRST: Compare sample_type within each depth (lowercase letters)
+cld_lower <- data.frame()
+
+for (j in unique(x_df$OTU)) {
+  for (d in unique(x_df$depth)) {
+    df <- x_df[x_df$OTU == j & x_df$depth == d, ]
+    
+    # Need at least 2 sample types
+    if (length(unique(df$sample_type)) < 2) next
+    
+    tryCatch({
+      res.aov <- aov(Abundance ~ sample_type, data = df)
+      tukey <- glht(res.aov, linfct = mcp(sample_type = "Tukey"))
+      cld_letters <- cld(tukey, level = 0.05)
+      
+      cld_df <- data.frame(
+        OTU = j,
+        depth = d,
+        sample_type = names(cld_letters$mcletters$Letters),
+        cld_lower = gsub(" ", "", cld_letters$mcletters$Letters),
+        stringsAsFactors = FALSE
+      )
+      
+      cld_lower <- rbind(cld_lower, cld_df)
+    }, error = function(e) {
+      # Skip if error
+      message(paste("Error in lowercase for OTU", j, "depth", d, ":", e$message))
+    })
+  }
+}
+
+print(paste("Lowercase comparisons:", nrow(cld_lower), "rows"))
+
+# 4. SECOND: Compare depth within each sample_type (uppercase letters)
+cld_upper <- data.frame()
+
+for (j in unique(x_df$OTU)) {
+  for (st in unique(x_df$sample_type)) {
+    df <- x_df[x_df$OTU == j & x_df$sample_type == st, ]
+    
+    # Need at least 2 depths
+    if (length(unique(df$depth)) < 2) next
+    
+    tryCatch({
+      # Convert depth to factor
+      df$depth_factor <- factor(df$depth, 
+                               levels = c("0...10", "10...20", "20...30", "30...40", "40..."))
+      
+      res.aov <- aov(Abundance ~ depth_factor, data = df)
+      tukey <- glht(res.aov, linfct = mcp(depth_factor = "Tukey"))
+      cld_letters <- cld(tukey, level = 0.05)
+      
+      cld_df <- data.frame(
+        OTU = j,
+        sample_type = st,
+        depth = names(cld_letters$mcletters$Letters),
+        cld_upper = gsub(" ", "", toupper(cld_letters$mcletters$Letters)),
+        stringsAsFactors = FALSE
+      )
+      
+      cld_upper <- rbind(cld_upper, cld_df)
+    }, error = function(e) {
+      # Skip if error
+      message(paste("Error in uppercase for OTU", j, "sample_type", st, ":", e$message))
+    })
+  }
+}
+
+print(paste("Uppercase comparisons:", nrow(cld_upper), "rows"))
+
+# 5. Check if we got results
+print("Preview of cld_lower:")
+print(head(cld_lower))
+print("\nPreview of cld_upper:")
+print(head(cld_upper))
+
+# 6. Merge results
+if (nrow(cld_lower) > 0) {
+  x <- merge(x, cld_lower, by = c("OTU", "depth", "sample_type"), all.x = TRUE)
+} else {
+  x$cld_lower <- NA
+}
+
+if (nrow(cld_upper) > 0) {
+  x <- merge(x, cld_upper, by = c("OTU", "sample_type", "depth"), all.x = TRUE)
+} else {
+  x$cld_upper <- NA
+}
+
+# Replace NA with empty string
+x$cld_lower[is.na(x$cld_lower)] <- ""
+x$cld_upper[is.na(x$cld_upper)] <- ""
+
+# 7. Append letters directly without parentheses
+x <- x %>%
+  mutate(
+    mean_se = case_when(
+      cld_lower != "" & cld_upper != "" ~ paste(mean_se, cld_lower, cld_upper),
+      cld_lower != "" ~ paste(mean_se, cld_lower),
+      cld_upper != "" ~ paste(mean_se, cld_upper),
+      TRUE ~ mean_se
+    )
+  )
+
+# Remove the separate cld columns
+x$cld_lower <- NULL
+x$cld_upper <- NULL
+
+# Arrange for better viewing
+x <- x %>% arrange(OTU, depth, sample_type)
+
+```
+
+
+
+# 10. CAZyme specific ubstrate
+
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+ps_x <- aggregate_rare(ps_RA, level = 'Substrate', detection = 0/100, prevalence = 0/140)
+ps_x
+
+
+tax <- as.data.frame(tax_table(ps_x))
+
+meta <- meta(ps)
+
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+sample_data(ps_x) <- sample_data(meta)
+
+ps_x
+```
+
+
+
+```{r}
+ps_y <- ps_x
+```
+
+
+
+```{r}
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+```
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+Peptidoglycan <- ggplot(df, aes(x = Layer, y = Peptidoglycan, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "Peptidoglycan-derived C\ndecomposing CAZymes") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+Peptidoglycan
+
+```
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+Chitin <- ggplot(df, aes(x = Layer, y = Chitin, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "Chitin-derived C\ndecomposing CAZymes") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+Chitin
+
+```
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+Glucans <- ggplot(df, aes(x = Layer, y = Glucans, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "Glucans-derived C\ndecomposing CAZymes") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+Glucans
+
+```
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+Cellulose <- ggplot(df, aes(x = Layer, y = Cellulose, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "Cellulose-derived C\ndecomposing CAZymes") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+Cellulose
+
+```
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+Hemicellulose <- ggplot(df, aes(x = Layer, y = Hemicellulose, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "Hemicellulose-derived C\ndecomposing CAZymes") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+Hemicellulose
+
+```
+
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+Lignin <- ggplot(df, aes(x = Layer, y = Lignin, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "Lignin-derived C\ndecomposing CAZymes") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+Lignin
+
+```
+
+
+
+
+# 11. Carbon target decomposing: fungi, bacteria, plant
+
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+ps_x <- aggregate_rare(ps_RA, level = 'C_target', detection = 0/100, prevalence = 0/140)
+ps_x
+
+
+tax <- as.data.frame(tax_table(ps_x))
+
+meta <- meta(ps)
+
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+sample_data(ps_x) <- sample_data(meta)
+
+ps_x
+```
+
+
+
+```{r}
+ps_y <- ps_x
+```
+
+
+
+```{r}
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+```
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+bacteria <- ggplot(df, aes(x = Layer, y = bacteria, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "bacteria") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+bacteria
+
+```
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+fungi <- ggplot(df, aes(x = Layer, y = fungi, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "fungi") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+fungi
+
+```
+
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+plant <- ggplot(df, aes(x = Layer, y = plant, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "plant") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+plant
+```
+
+
+
+
+## 11.1. Test
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+ps_x <- aggregate_rare(ps_RA, level = 'C_target', detection = 0/100, prevalence = 0/140)
+ps_x
+
+
+tax <- as.data.frame(tax_table(ps_x))
+
+meta <- meta(ps)
+
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+sample_data(ps_x) <- sample_data(meta)
+
+ps_x
+```
+
+
+
+
+```{r}
+ps_y <- subset_samples(ps_x, depth=="30...40")
+ps_y
+```
+
+
+```{r}
+library(car)
+
+x_df <- psmelt(ps_y)
+
+taxa <- unique(x_df$OTU)
+
+for (i in taxa) {
+ df <- filter(x_df, OTU == i)
+ print(i)
+ # Using leveneTest()
+result = leveneTest(Abundance ~ sample_type, df)
+# print the result
+print(result)
+
+}
+
+x <- x_df %>%
+  filter(OTU %in% taxa) %>% group_by(OTU, sample_type) %>% summarise(mean = mean(Abundance, na.rm = TRUE), se = (sd(Abundance, na.rm = TRUE)/sqrt(length((Abundance)))))
+print(x)
+
+```
+
+all are homogenous
+
+```{r}
+y_df <- psmelt(ps_x)
+x <- y_df %>%
+  group_by(OTU, sample_type, depth) %>% summarise(mean = round(mean(Abundance, na.rm = TRUE)*100,1), se = round((sd(Abundance, na.rm = TRUE)/sqrt(length((Abundance)))) * 100,1))
+x <- subset(x, OTU!="Unknown")
+print(x)
+
+```
+
+
+Parametric test
+
+
+
+
+```{r}
+library(multcomp)
+library(car)
+library(dplyr)
+
+# 1. Create summary table
+y_df <- psmelt(ps_x)
+x <- y_df %>%
+  group_by(OTU, sample_type, depth) %>% 
+  summarise(
+    mean = round(mean(Abundance, na.rm = TRUE) * 100, 1), 
+    se = round((sd(Abundance, na.rm = TRUE) / sqrt(n())) * 100, 1),
+    .groups = 'drop'
+  )
+
+# Remove Unknown OTU
+x <- subset(x, OTU != "Unknown")
+
+# Combine mean and se
+x <- x %>%
+  mutate(mean_se = paste0(mean, " ± ", se)) %>%
+  dplyr::select(-mean, -se)
+
+# 2. Get data for tests
+x_df <- psmelt(ps_x)
+x_df$OTU <- as.factor(x_df$OTU)
+x_df <- subset(x_df, OTU != "Unknown")
+
+# 3. FIRST: Compare sample_type within each depth (lowercase letters)
+cld_lower <- data.frame()
+
+for (j in unique(x_df$OTU)) {
+  for (d in unique(x_df$depth)) {
+    df <- x_df[x_df$OTU == j & x_df$depth == d, ]
+    
+    # Need at least 2 sample types
+    if (length(unique(df$sample_type)) < 2) next
+    
+    tryCatch({
+      res.aov <- aov(Abundance ~ sample_type, data = df)
+      tukey <- glht(res.aov, linfct = mcp(sample_type = "Tukey"))
+      cld_letters <- cld(tukey, level = 0.05)
+      
+      cld_df <- data.frame(
+        OTU = j,
+        depth = d,
+        sample_type = names(cld_letters$mcletters$Letters),
+        cld_lower = gsub(" ", "", cld_letters$mcletters$Letters),
+        stringsAsFactors = FALSE
+      )
+      
+      cld_lower <- rbind(cld_lower, cld_df)
+    }, error = function(e) {
+      # Skip if error
+      message(paste("Error in lowercase for OTU", j, "depth", d, ":", e$message))
+    })
+  }
+}
+
+print(paste("Lowercase comparisons:", nrow(cld_lower), "rows"))
+
+# 4. SECOND: Compare depth within each sample_type (uppercase letters)
+cld_upper <- data.frame()
+
+for (j in unique(x_df$OTU)) {
+  for (st in unique(x_df$sample_type)) {
+    df <- x_df[x_df$OTU == j & x_df$sample_type == st, ]
+    
+    # Need at least 2 depths
+    if (length(unique(df$depth)) < 2) next
+    
+    tryCatch({
+      # Convert depth to factor
+      df$depth_factor <- factor(df$depth, 
+                               levels = c("0...10", "10...20", "20...30", "30...40", "40..."))
+      
+      res.aov <- aov(Abundance ~ depth_factor, data = df)
+      tukey <- glht(res.aov, linfct = mcp(depth_factor = "Tukey"))
+      cld_letters <- cld(tukey, level = 0.05)
+      
+      cld_df <- data.frame(
+        OTU = j,
+        sample_type = st,
+        depth = names(cld_letters$mcletters$Letters),
+        cld_upper = gsub(" ", "", toupper(cld_letters$mcletters$Letters)),
+        stringsAsFactors = FALSE
+      )
+      
+      cld_upper <- rbind(cld_upper, cld_df)
+    }, error = function(e) {
+      # Skip if error
+      message(paste("Error in uppercase for OTU", j, "sample_type", st, ":", e$message))
+    })
+  }
+}
+
+print(paste("Uppercase comparisons:", nrow(cld_upper), "rows"))
+
+# 5. Check if we got results
+print("Preview of cld_lower:")
+print(head(cld_lower))
+print("\nPreview of cld_upper:")
+print(head(cld_upper))
+
+# 6. Merge results
+if (nrow(cld_lower) > 0) {
+  x <- merge(x, cld_lower, by = c("OTU", "depth", "sample_type"), all.x = TRUE)
+} else {
+  x$cld_lower <- NA
+}
+
+if (nrow(cld_upper) > 0) {
+  x <- merge(x, cld_upper, by = c("OTU", "sample_type", "depth"), all.x = TRUE)
+} else {
+  x$cld_upper <- NA
+}
+
+# Replace NA with empty string
+x$cld_lower[is.na(x$cld_lower)] <- ""
+x$cld_upper[is.na(x$cld_upper)] <- ""
+
+# 7. Append letters directly without parentheses
+x <- x %>%
+  mutate(
+    mean_se = case_when(
+      cld_lower != "" & cld_upper != "" ~ paste(mean_se, cld_lower, cld_upper),
+      cld_lower != "" ~ paste(mean_se, cld_lower),
+      cld_upper != "" ~ paste(mean_se, cld_upper),
+      TRUE ~ mean_se
+    )
+  )
+
+# Remove the separate cld columns
+x$cld_lower <- NULL
+x$cld_upper <- NULL
+
+# Arrange for better viewing
+x <- x %>% arrange(OTU, depth, sample_type)
+
+```
+
+
+
+
+# 12. LINEAR MODEL
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+ps_x <- aggregate_rare(ps_RA, level = 'Derived', detection = 0/100, prevalence = 0/140)
+ps_x
+
+
+tax <- as.data.frame(tax_table(ps_x))
+
+meta <- meta(ps)
+
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+sample_data(ps_x) <- sample_data(meta)
+
+ps_x
+```
+
+
+```{r}
+y_df <- psmelt(ps_x)
+y_df <- y_df[, (c("OTU", "Abundance", "sampleID"))]
+df <- y_df %>% 
+  pivot_wider(
+    names_from = OTU, 
+    values_from = Abundance,
+    values_fill = 0  # Optional: fill missing values with 0
+  )
+meta <- meta(ps_x)
+meta <- left_join(meta, df, by="sampleID")
+names(meta)
+```
+
+Complete analysis WITH TYPE ii ANOVA
+
+
+without forest
+
+```{r}
+library(lmtest)
+library(sandwich)
+library(car)
+library(effectsize)
+library(performance)
+
+meta_nf <- subset(meta, sample_type!="forest")
+# 1. Main analysis with effect sizes
+m1 <- lm(C_g_per_kg ~ depth + Plant, meta_nf)
+summary(m1)
+aov_t2 <- Anova(m1, type = "II")
+effects <- eta_squared(aov_t2, partial = TRUE)
+print(effects)
+
+# Key diagnostics to report:
+check_normality(m1)
+check_heteroscedasticity(m1)
+check_outliers(m1)
+
+# 2. Robustness check
+robust_anova <- Anova(m1, type = "II", vcov = vcovHC(m1, type = "HC3"))
+robust_coef <- coeftest(m1, vcov = vcovHC(m1, type = "HC3"))
+
+# 3. Compare
+print(robust_anova)
+print(robust_coef)
+```
+
+
+
+# 13. Alternative figures
+
+Plant and Microbial derived C decomposing
+
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+ps_x <- aggregate_rare(ps_RA, level = 'Derived', detection = 0/100, prevalence = 0/140)
+ps_x
+
+
+tax <- as.data.frame(tax_table(ps_x))
+
+meta <- meta(ps)
+
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+sample_data(ps_x) <- sample_data(meta)
+
+ps_x
+```
+
+
+
+```{r}
+ps_y <- ps_x
+```
+
+
+
+```{r}
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+```
+
+```{r}
+names(gene_data)
+```
+
+
+```{r}
+# create your own color palette for sample types
+MyPalette <- c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c")
+```
+
+
+Reshape df
+
+```{r}
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+df$plant_microbe_ratio <- df$Plant / df$Microbial
+df$plant_minus_microbe <- df$Plant - df$Microbial
+
+df_long <- df %>%
+  pivot_longer(
+    cols = c(Microbial, Plant),  # Columns to combine
+    names_to = "Derived",  # New column for GH/GT
+    values_to = "Proportion"  # New column for values
+  )
+```
+
+
+
+
+
+
+```{r}
+fig <- df_long %>%
+  group_by(sample_type, depth_numerical, Derived) %>%
+  summarise(
+    mean = mean(Proportion, na.rm = TRUE),
+    se = sd(Proportion, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  ungroup() %>%
+  ggplot(aes(
+    y = mean,
+    x = depth_numerical,
+    color = sample_type
+  )) +
+  geom_line(position = position_dodge(1.2)) +
+  geom_point(size = 2, position = position_dodge(1.2)) +
+  geom_errorbar(
+    aes(ymin = mean - se, ymax = mean + se),
+    width = 0.3,
+    position = position_dodge(1.2),
+    linetype = "solid",
+    alpha = 0.5
+  ) +
+  coord_flip() +
+  scale_x_reverse() +
+  facet_wrap(~ Derived, 
+             scales = "free_x",
+             labeller = labeller(Derived = c(
+               "Microbial" = "Microbial-derived C\ndecomposing CAZymes",
+               "Plant" = "Plant-derived C\ndecomposing CAZymes"
+             ))) +
+  scale_colour_manual(values = MyPalette) +
+  labs(
+    x = "Soil layer",
+    y = "Proportion",
+    color = "Treatment"
+  ) +
+  theme_cowplot() +
+  theme(
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 16, face = "bold"),
+    legend.text = element_text(size = 16),
+    legend.title=element_text(size = 16),
+    plot.title = element_text(size = 16, hjust = 0.5),
+    panel.border = element_rect(colour = "black", fill = NA, size = 0.5),
+    strip.text = element_text(size = 16)
+  ) +
+  scale_x_reverse(
+    breaks = c(60, 35, 25, 15, 5),
+    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
+  )
+
+print(fig)
+```
+
+
+
+
+
+
+C target decomposing
+
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+ps_x <- aggregate_rare(ps_RA, level = 'C_target', detection = 0/100, prevalence = 0/140)
+ps_x
+
+
+tax <- as.data.frame(tax_table(ps_x))
+
+meta <- meta(ps)
+
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+sample_data(ps_x) <- sample_data(meta)
+
+ps_x
+```
+
+
+
+```{r}
+ps_y <- ps_x
+```
+
+
+
+```{r}
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+```
+
+```{r}
+names(gene_data)
+```
+
+
+```{r}
+# create your own color palette for sample types
+MyPalette <- c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c")
+```
+
+
+Reshape df
+
+```{r}
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+df_long <- df %>%
+  pivot_longer(
+    cols = c(bacteria, fungi, plant),  # Columns to combine
+    names_to = "Derived",  # New column for GH/GT
+    values_to = "Proportion"  # New column for values
+  )
+```
+
+
+
+
+
+
+```{r}
+fig <- df_long %>%
+  group_by(sample_type, depth_numerical, Derived) %>%
+  summarise(
+    mean = mean(Proportion, na.rm = TRUE),
+    se = sd(Proportion, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  ungroup() %>%
+  ggplot(aes(
+    y = mean,
+    x = depth_numerical,
+    color = sample_type
+  )) +
+  geom_line(position = position_dodge(1.2)) +
+  geom_point(size = 2, position = position_dodge(1.2)) +
+  geom_errorbar(
+    aes(ymin = mean - se, ymax = mean + se),
+    width = 0.3,
+    position = position_dodge(1.2),
+    linetype = "solid",
+    alpha = 0.5
+  ) +
+  coord_flip() +
+  scale_x_reverse() +
+  facet_wrap(~ Derived, 
+             scales = "free_x",
+             labeller = labeller(Derived = c(
+               "bacteria" = "Bacterial-derived C",
+               "fungi" = "Fungi-derived C", 
+               "plant" = "Plant-derived C"
+             ))) +
+  scale_colour_manual(values = MyPalette) +
+  labs(
+    x = "Soil layer",
+    y = "Proportion",
+    color = "Treatment"
+  ) +
+  theme_cowplot() +
+  theme(
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 14),
+    legend.text = element_text(size = 14),
+    legend.title = element_text(size = 14),
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.border = element_rect(colour = "black", fill = NA, size = 0.5),
+    strip.text = element_text(size = 12)
+  ) +
+  scale_x_reverse(
+    breaks = c(60, 35, 25, 15, 5),
+    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
+  )
+
+print(fig)
+```
+
+
+
+
+
+
+
+
+
+Plant and Microbial derived C decomposing
+
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+ps_x <- aggregate_rare(ps_RA, level = 'Substrate', detection = 0/100, prevalence = 0/140)
+ps_x
+
+
+tax <- as.data.frame(tax_table(ps_x))
+
+meta <- meta(ps)
+
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+sample_data(ps_x) <- sample_data(meta)
+
+ps_x
+```
+
+
+
+```{r}
+ps_y <- ps_x
+```
+
+
+
+```{r}
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+```
+
+```{r}
+names(gene_data)
+```
+
+
+```{r}
+# create your own color palette for sample types
+MyPalette <- c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c")
+```
+
+
+Reshape df
+
+```{r}
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+
+df_long <- df %>%
+  pivot_longer(
+    cols = c(Peptidoglycan, Chitin, Glucans, Cellulose, Hemicellulose, Lignin),  # Columns to combine
+    names_to = "Substrate",  # New column for GH/GT
+    values_to = "Proportion"  # New column for values
+  )
+```
+
+
+
+
+
+
+
+
+
+```{r}
+df_long$Substrate <- factor(df_long$Substrate, levels = c("Lignin", "Hemicellulose", "Cellulose", "Peptidoglycan", "Chitin", "Glucans"))
+
+fig <- df_long %>%
+  group_by(sample_type, depth_numerical, Substrate) %>%
+  summarise(
+    mean = mean(Proportion, na.rm = TRUE),
+    se = sd(Proportion, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  ungroup() %>%
+  ggplot(aes(
+    y = mean,
+    x = depth_numerical,
+    color = sample_type
+  )) +
+  geom_line(position = position_dodge(1.2)) +
+  geom_point(size = 2, position = position_dodge(1.2)) +
+  geom_errorbar(
+    aes(ymin = mean - se, ymax = mean + se),
+    width = 0.3,
+    position = position_dodge(1.2),
+    linetype = "solid",
+    alpha = 0.5
+  ) +
+  coord_flip() +
+  scale_x_reverse() +
+  facet_wrap(~ Substrate, 
+             scales = "free_x",
+             labeller = labeller(Substrate = c(
+               "Peptidoglycan" = "Peptidoglycan (bacterial)",
+               "Chitin" = "Chitin (fungal)",
+               "Glucans" = "Glucans (fungal)"
+             ))) +
+  scale_colour_manual(values = MyPalette) +
+  labs(
+    x = "Soil layer",
+    y = "Proportion of CAZyme genes targeting different C fractions",
+    color = "Treatment"
+  ) +
+  theme_cowplot() +
+  theme(
+    legend.position = "top",
+    legend.title = element_blank(),    # This now overrides cowplot
+    legend.justification = "center",  # This centers the legend
+    axis.text = element_text(size = 16),
+    axis.title = element_text(size = 20, face = "bold"),
+    legend.text = element_text(size = 20),
+    plot.title = element_text(size = 20, hjust = 0.5),
+    panel.border = element_rect(colour = "black", fill = NA, size = 0.5),
+    strip.text = element_text(size = 20)
+  ) +
+  scale_x_reverse(
+    breaks = c(60, 35, 25, 15, 5),
+    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
+  )
+
+print(fig)
+```
+
+
+
+
+
+CAZyme family figures
+
+```{r}
+# create your own color palette for sample types
+MyPalette <- c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c")
+```
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+ps_x <- aggregate_rare(ps_RA, level = 'family', detection = 0/100, prevalence = 0/140)# change the level accordingly: "Derived"   "C_target"  "Substrate" "family"    "enzyme"
+ps_x
+
+
+tax <- as.data.frame(tax_table(ps_x))
+
+meta <- meta(ps)
+
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+sample_data(ps_x) <- sample_data(meta)
+
+ps_x
+
+df <- psmelt(ps_x)
+```
+
+
+GT
+
+
+```{r}
+GT <- df %>%
+  filter(OTU %in% c("GT")) %>%
+  group_by(sample_type, depth_numerical, OTU) %>%
+  summarise(
+    mean = mean(Abundance, na.rm = TRUE),
+    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  ungroup() %>%
+  ggplot(aes(
+    y = mean,
+    x = depth_numerical,
+    color = sample_type
+  )) +
+  geom_line(position = position_dodge(1.2)) +
+  geom_point(size = 2, position = position_dodge(1.2)) +
+  geom_errorbar(
+    aes(ymin = mean - se, ymax = mean + se),
+    width = 0.3,
+    position = position_dodge(1.2),
+    linetype = "solid",
+    alpha = 0.5
+  ) +
+  coord_flip() +
+  scale_x_reverse() +
+  scale_colour_manual(values = MyPalette) +
+  labs(
+    x = "Soil layer",
+    y = "GT",
+    color = NULL  # Remove legend title
+  ) +
+  theme_cowplot() +
+  theme(
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 14, face = "bold"),  # Bold axis titles only
+    legend.text = element_text(size = 14),  # No bold for legend text
+    legend.title = element_blank(),  # Remove legend title (alternative method)
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.border = element_rect(colour = "black", fill = NA, size = 0.5)
+  ) +
+  scale_x_reverse(
+    breaks = c(60, 35, 25, 15, 5),
+    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
+  ) +
+  guides(color = guide_legend(override.aes = list(shape = 15)))
+
+print(GT)
+```
+
+
+
+
+GH
+
+
+```{r}
+GH <- df %>%
+  filter(OTU %in% c("GH")) %>%
+  group_by(sample_type, depth_numerical, OTU) %>%
+  summarise(
+    mean = mean(Abundance, na.rm = TRUE),
+    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  ungroup() %>%
+  ggplot(aes(
+    y = mean,
+    x = depth_numerical,
+    color = sample_type
+  )) +
+  geom_line(position = position_dodge(1.2)) +
+  geom_point(size = 2, position = position_dodge(1.2)) +
+  geom_errorbar(
+    aes(ymin = mean - se, ymax = mean + se),
+    width = 0.3,
+    position = position_dodge(1.2),
+    linetype = "solid",
+    alpha = 0.5
+  ) +
+  coord_flip() +
+  scale_x_reverse() +
+  scale_colour_manual(values = MyPalette) +
+  labs(
+    x = "Soil layer",
+    y = "GH",
+    color = NULL  # Remove legend title
+  ) +
+  theme_cowplot() +
+  theme(
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 14, face = "bold"),  # Bold axis titles only
+    legend.text = element_text(size = 14),  # No bold for legend text
+    legend.title = element_blank(),  # Remove legend title (alternative method)
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.border = element_rect(colour = "black", fill = NA, size = 0.5)
+  ) +
+  scale_x_reverse(
+    breaks = c(60, 35, 25, 15, 5),
+    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
+  ) +
+  guides(color = guide_legend(override.aes = list(shape = 15)))
+
+print(GH)
+```
+
+
+
+ AA
+
+
+```{r}
+AA <- df %>%
+  filter(OTU %in% c("AA")) %>%
+  group_by(sample_type, depth_numerical, OTU) %>%
+  summarise(
+    mean = mean(Abundance, na.rm = TRUE),
+    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  ungroup() %>%
+  ggplot(aes(
+    y = mean,
+    x = depth_numerical,
+    color = sample_type
+  )) +
+  geom_line(position = position_dodge(1.2)) +
+  geom_point(size = 2, shape = 15, position = position_dodge(1.2)) +
+  geom_errorbar(
+    aes(ymin = mean - se, ymax = mean + se),
+    width = 0.3,
+    position = position_dodge(1.2),
+    linetype = "solid",
+    alpha = 0.5
+  ) +
+  coord_flip() +
+  scale_x_reverse() +
+  scale_colour_manual(values = MyPalette) +
+  labs(
+    x = "Soil layer",
+    y = "AA",
+    color = NULL  # Remove legend title
+  ) +
+  theme_cowplot() +
+  theme(
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 14, face = "bold"),  # Bold axis titles only
+    legend.text = element_text(size = 14),  # No bold for legend text
+    legend.title = element_blank(),  # Remove legend title (alternative method)
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.border = element_rect(colour = "black", fill = NA, size = 0.5)
+  ) +
+  scale_x_reverse(
+    breaks = c(60, 35, 25, 15, 5),
+    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
+  ) +
+  guides(color = guide_legend(override.aes = list(shape = 15)))
+
+print(AA)
+```
+
+
+
+CE
+
+
+```{r}
+CE <- df %>%
+  filter(OTU %in% c("CE")) %>%
+  group_by(sample_type, depth_numerical, OTU) %>%
+  summarise(
+    mean = mean(Abundance, na.rm = TRUE),
+    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  ungroup() %>%
+  ggplot(aes(
+    y = mean,
+    x = depth_numerical,
+    color = sample_type
+  )) +
+  geom_line(position = position_dodge(1.2)) +
+  geom_point(size = 2, shape = 15, position = position_dodge(1.2)) +
+  geom_errorbar(
+    aes(ymin = mean - se, ymax = mean + se),
+    width = 0.3,
+    position = position_dodge(1.2),
+    linetype = "solid",
+    alpha = 0.5
+  ) +
+  coord_flip() +
+  scale_x_reverse() +
+  scale_colour_manual(values = MyPalette) +
+  labs(
+    x = "Soil layer",
+    y = "CE",
+    color = NULL  # Remove legend title
+  ) +
+  theme_cowplot() +
+  theme(
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 14, face = "bold"),  # Bold axis titles only
+    legend.text = element_text(size = 14),  # No bold for legend text
+    legend.title = element_blank(),  # Remove legend title (alternative method)
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.border = element_rect(colour = "black", fill = NA, size = 0.5)
+  ) +
+  scale_x_reverse(
+    breaks = c(60, 35, 25, 15, 5),
+    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
+  ) +
+  guides(color = guide_legend(override.aes = list(shape = 15)))
+
+print(CE)
+```
+
+
+
+
+ PL
+
+
+```{r}
+PL <- df %>%
+  filter(OTU %in% c("PL")) %>%
+  group_by(sample_type, depth_numerical, OTU) %>%
+  summarise(
+    mean = mean(Abundance, na.rm = TRUE),
+    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  ungroup() %>%
+  ggplot(aes(
+    y = mean,
+    x = depth_numerical,
+    color = sample_type
+  )) +
+  geom_line(position = position_dodge(1.2)) +
+  geom_point(size = 2, shape = 15, position = position_dodge(1.2)) +
+  geom_errorbar(
+    aes(ymin = mean - se, ymax = mean + se),
+    width = 0.3,
+    position = position_dodge(1.2),
+    linetype = "solid",
+    alpha = 0.5
+  ) +
+  coord_flip() +
+  scale_x_reverse() +
+  scale_colour_manual(values = MyPalette) +
+  labs(
+    x = "Soil layer",
+    y = "PL",
+    color = NULL  # Remove legend title
+  ) +
+  theme_cowplot() +
+  theme(
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 14, face = "bold"),  # Bold axis titles only
+    legend.text = element_text(size = 14),  # No bold for legend text
+    legend.title = element_blank(),  # Remove legend title (alternative method)
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.border = element_rect(colour = "black", fill = NA, size = 0.5)
+  ) +
+  scale_x_reverse(
+    breaks = c(60, 35, 25, 15, 5),
+    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
+  ) +
+  guides(color = guide_legend(override.aes = list(shape = 15)))
+
+print(PL)
+```
+
+
+CBM
+
+
+```{r}
+CBM <- df %>%
+  filter(OTU %in% c("CBM")) %>%
+  group_by(sample_type, depth_numerical, OTU) %>%
+  summarise(
+    mean = mean(Abundance, na.rm = TRUE),
+    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  ungroup() %>%
+  ggplot(aes(
+    y = mean,
+    x = depth_numerical,
+    color = sample_type
+  )) +
+  geom_line(position = position_dodge(1.2)) +
+  geom_point(size = 2, position = position_dodge(1.2)) +
+  geom_errorbar(
+    aes(ymin = mean - se, ymax = mean + se),
+    width = 0.3,
+    position = position_dodge(1.2),
+    linetype = "solid",
+    alpha = 0.5
+  ) +
+  coord_flip() +
+  scale_x_reverse() +
+  scale_colour_manual(values = MyPalette) +
+  labs(
+    x = "Soil layer",
+    y = "CBM",
+    color = NULL  # Remove legend title
+  ) +
+  theme_cowplot() +
+  theme(
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 14, face = "bold"),  # Bold axis titles only
+    legend.text = element_text(size = 14),  # No bold for legend text
+    legend.title = element_blank(),  # Remove legend title (alternative method)
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.border = element_rect(colour = "black", fill = NA, size = 0.5)
+  ) +
+  scale_x_reverse(
+    breaks = c(60, 35, 25, 15, 5),
+    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
+  ) +
+  guides(color = guide_legend(override.aes = list(shape = 15)))
+
+print(CBM)
+```
+
+
+
+
+SLH
+
+
+```{r}
+SLH <- df %>%
+  filter(OTU %in% c("SLH")) %>%
+  group_by(sample_type, depth_numerical, OTU) %>%
+  summarise(
+    mean = mean(Abundance, na.rm = TRUE),
+    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  ungroup() %>%
+  ggplot(aes(
+    y = mean,
+    x = depth_numerical,
+    color = sample_type
+  )) +
+  geom_line(position = position_dodge(1.2)) +
+  geom_point(size = 2, position = position_dodge(1.2)) +
+  geom_errorbar(
+    aes(ymin = mean - se, ymax = mean + se),
+    width = 0.3,
+    position = position_dodge(1.2),
+    linetype = "solid",
+    alpha = 0.5
+  ) +
+  coord_flip() +
+  scale_x_reverse() +
+  scale_colour_manual(values = MyPalette) +
+  labs(
+    x = "Soil layer",
+    y = "SLH",
+    color = NULL  # Remove legend title
+  ) +
+  theme_cowplot() +
+  theme(
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 14, face = "bold"),  # Bold axis titles only
+    legend.text = element_text(size = 14),  # No bold for legend text
+    legend.title = element_blank(),  # Remove legend title (alternative method)
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.border = element_rect(colour = "black", fill = NA, size = 0.5)
+  ) +
+  scale_x_reverse(
+    breaks = c(60, 35, 25, 15, 5),
+    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
+  ) +
+  guides(color = guide_legend(override.aes = list(shape = 15)))
+
+print(SLH)
+```
+
+
+
+
+Cohesin
+
+
+```{r}
+Cohesin <- df %>%
+  filter(OTU %in% c("cohesin")) %>%
+  group_by(sample_type, depth_numerical, OTU) %>%
+  summarise(
+    mean = mean(Abundance, na.rm = TRUE),
+    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  ungroup() %>%
+  ggplot(aes(
+    y = mean,
+    x = depth_numerical,
+    color = sample_type
+  )) +
+  geom_line(position = position_dodge(1.2)) +
+  geom_point(size = 2, position = position_dodge(1.2)) +
+  geom_errorbar(
+    aes(ymin = mean - se, ymax = mean + se),
+    width = 0.3,
+    position = position_dodge(1.2),
+    linetype = "solid",
+    alpha = 0.5
+  ) +
+  coord_flip() +
+  scale_x_reverse() +
+  scale_colour_manual(values = MyPalette) +
+  labs(
+    x = "Soil layer",
+    y = "Cohesin",
+    color = NULL  # Remove legend title
+  ) +
+  theme_cowplot() +
+  theme(
+    axis.text = element_text(size = 14),
+    axis.title = element_text(size = 14, face = "bold"),  # Bold axis titles only
+    legend.text = element_text(size = 14),  # No bold for legend text
+    legend.title = element_blank(),  # Remove legend title (alternative method)
+    plot.title = element_text(size = 18, hjust = 0.5),
+    panel.border = element_rect(colour = "black", fill = NA, size = 0.5)
+  ) +
+  scale_x_reverse(
+    breaks = c(60, 35, 25, 15, 5),
+    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
+  ) +
+  guides(color = guide_legend(override.aes = list(shape = 15)))
+
+print(Cohesin)
+```
+
+
+
+
+Combine important CAZyme family figures
+
+
+
+```{r}
+
+library(ggpubr)
+
+figure1 <-  ggarrange(GH, GT + rremove("ylab") + rremove("y.text") + rremove("y.ticks"), widths = c(1, 0.80, 0.80), hjust = c(-0.5, 0.5, 0.5),
+                    align = "h", ncol = 3, nrow = 1, common.legend = TRUE, legend = "top")
+
+figure2 <-  ggarrange(AA, CE + rremove("ylab") + rremove("y.text") + rremove("y.ticks"), PL + rremove("ylab") + rremove("y.text") + rremove("y.ticks"),
+                    widths = c(1, 0.80, 0.80), hjust = c(-0.5, 0.5, 0.5),
+                    align = "h", ncol = 3, nrow = 1, legend = "none")
+
+figure <- ggarrange(figure1, figure2,
+                   heights = c(1, 1),
+                    align = "h", ncol = 1, nrow = 2)
+
+#figure <- annotate_figure(figure, left = text_grob("CAZymes decomposing C derived from",size = 14, rot = 90, face = "bold"))
+
+figure
+```
+
+
+
+
+```{r}
+rm(list = ls())
+```
+
+
+
+
+

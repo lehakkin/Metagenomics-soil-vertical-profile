@@ -1,0 +1,628 @@
+---
+title: "Mantel correlations"
+output: html_document
+date: "2026-05-16"
+---
+
+
+
+
+
+
+# Mantel correlations
+
+We will do regular correlations as well as partial correlation so that depth is controlled for
+
+# 1. Regular Mantel
+
+```{r}
+library('phyloseq')
+library("cowplot")
+library("dplyr")
+library("ggplot2")
+library("vegan")
+library("microbiome")
+library("tibble")
+library("readxl")
+library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(stringr)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer')
+
+load(file = 'ps_clustered_97')#ps
+ps
+
+meta <- meta(ps)
+```
+
+
+
+
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+keep <- sample.names(ps_RA)
+```
+
+
+
+
+
+
+
+```{r}
+meta <- meta(ps_RA)
+
+colnames(meta)[which(names(meta) == "pH_H2O")] <- "pH"
+colnames(meta)[which(names(meta) == "EC_uScm")] <- "EC"
+colnames(meta)[which(names(meta) == "C_g_per_kg")] <- "C"
+colnames(meta)[which(names(meta) == "N_gkg")] <- "N"
+colnames(meta)[which(names(meta) == "TP_gkg")] <- "P"
+colnames(meta)[which(names(meta) == "Alox_mmolkg")] <- "Al-ox"
+colnames(meta)[which(names(meta) == "Feox_mmolkg")] <- "Fe-ox"
+colnames(meta)[which(names(meta) == "oxides_mmolkg")] <- "Oxides"
+colnames(meta)[which(names(meta) == "PH2O_mgkg")] <- "P-H2O"
+colnames(meta)[which(names(meta) == "Porg_mgkg")] <- "P-org"
+colnames(meta)[which(names(meta) == "DOC_mgkg")] <- "DOC"
+colnames(meta)[which(names(meta) == "Pinorg_mgkg")] <- "P-inorg"
+colnames(meta)[which(names(meta) == "C_per_N")] <- "C/N"
+colnames(meta)[which(names(meta) == "log_root")] <- "Root biomass"
+colnames(meta)[which(names(meta) == "depth_numerical")] <- "Depth (numerical)"
+
+
+
+variables <- c("pH", "EC", "C", "N", "P", "Al-ox", "Fe-ox", "Oxides", "P-H2O", "P-org", "DOC", "P-inorg", "C/N", "Root biomass", "Depth (numerical)")
+
+```
+
+
+
+
+
+```{r}
+
+# Load required packages
+library(linkET)
+library(vegan)
+library(phyloseq)
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+
+# 1. Your working Bray-Curtis distance matrix
+bray_dist_taxonomy <- phyloseq::distance(ps_RA, method = "bray")
+
+# 2. Prepare environmental data (from your code)
+env_df <- meta[, variables]
+#env_df <- as.data.frame(lapply(env_df, as.numeric))
+#rownames(env_df) <- rownames(meta)
+
+env_df <- env_df[, c(1, 2, 3, 11, 4, 13, 5, 9, 10, 12, 8, 6, 7, 14, 15)]
+```
+
+
+
+
+
+
+lets run this For taxonomy only
+
+```{r}
+# Load required packages
+library(linkET)
+library(vegan)
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+
+# 1. Your working Mantel test code with NA handling
+mantel_results <- data.frame()
+
+for (i in 1:ncol(env_df)) {
+  env_dist <- dist(env_df[, i])
+  
+  m_test <- mantel(bray_dist_taxonomy, env_dist, 
+                   method = "pearson",
+                   permutations = 999,
+                   na.rm = TRUE)
+  
+  mantel_results <- rbind(mantel_results,
+                         data.frame(
+                           variable = colnames(env_df)[i],
+                           r = m_test$statistic,
+                           p = m_test$signif
+                         ))
+}
+
+# 2. Adjust p-values
+mantel_results$p_adj <- p.adjust(mantel_results$p, method = "BH")
+
+# 3. Format EXACTLY as geom_couple() expects
+mantel_for_plot <- mantel_results %>%
+  # Create spec column (microbiome group)
+  mutate(spec = "Prokaryotic\ncommunity",
+         # Create env column (must match correlation matrix names EXACTLY)
+         env = variable,
+         # Create rd factor with YOUR desired categories
+         rd = case_when(
+           abs(r) > 0.4 ~ ">0.4",
+           abs(r) >= 0.3 ~ "0.3-0.4",
+           abs(r) >= 0.2 ~ "0.2-0.3",
+           abs(r) >= 0.1 ~ "0.1-0.2",
+           TRUE ~ "<0.1"
+         ),
+         rd = factor(rd, levels = c("<0.1", "0.1-0.2", "0.2-0.3", "0.3-0.4", ">0.4")),
+         # Create pd factor as in tutorial
+         pd = case_when(
+           p_adj < 0.01 ~ "< 0.01",
+           p_adj < 0.05 ~ "0.01 - 0.05",
+           TRUE ~ ">= 0.05"
+         ),
+         pd = factor(pd, levels = c("< 0.01", "0.01 - 0.05", ">= 0.05"))
+  ) %>%
+  # Select columns in the right order
+  dplyr::select(spec, env, r, p, rd, pd)
+
+print("Mantel data for geom_couple:")
+print(mantel_for_plot)
+
+# 4. Create correlation matrix with pairwise completion for NAs
+env_cor_matrix <- cor(env_df, 
+                      use = "pairwise.complete.obs",
+                      method = "pearson")
+
+# Replace any remaining NAs with 0 (for visualization only)
+env_cor_matrix[is.na(env_cor_matrix)] <- 0
+
+# 5. Create the plot EXACTLY like tutorial
+p <- qcorrplot(env_cor_matrix, 
+               type = "lower", 
+               diag = FALSE,
+               is_corr = TRUE) +  # Explicitly state it's a correlation matrix
+  geom_square() +
+  geom_couple(aes(colour = pd, size = rd), 
+              data = mantel_for_plot, 
+              curvature = nice_curvature(),
+              key_glyph = "path") +  # Add this to control legend appearance
+  scale_fill_gradientn(colours = RColorBrewer::brewer.pal(11, "RdBu")) +
+  scale_size_manual(values = c(0.5, 1.5, 2.5, 4, 6)) +  # 5 values for 5 categories
+  scale_colour_manual(values = c("< 0.01" = "#D55E00",
+                                 "0.01 - 0.05" = "#0EA271",
+                                 ">= 0.05" = "grey35")) +
+  guides(
+    size = guide_legend(title = "Mantel's r",
+                       override.aes = list(colour = "grey35", 
+                                           linewidth = c(0.5, 1.5, 2.5, 4, 6)),  # 5 values to match categories
+                       order = 2),
+    colour = guide_legend(title = "Mantel's p (FDR)", 
+                         override.aes = list(size = 1.5,  # Thicker lines
+                                             linewidth = 1.5),  # Additional control
+                         order = 1),
+    fill = guide_colorbar(title = "Pearson's r", order = 3)
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    legend.position = "right",
+    legend.box = "vertical",
+    legend.key.size = unit(1.5, "lines")  # Increase legend key size
+  ) + theme(
+  plot.title = element_blank(),
+  axis.title.x = element_blank(),
+  axis.title.y = element_blank())
+
+print(p)
+
+```
+
+
+
+
+# 2. Partial Mantel with taxonomy, KEGG, and CAZyme
+
+PARTIAL MANTEL controlling for depth (numerical)
+
+
+```{r}
+setwd('C:\\Users\\lehakkin\\RStudio_computer')
+
+load(file = 'KOfam_metabolism_ps_COVERAGE_FINAL_PNSCO2')
+ps
+
+ps_KEGG <- ps
+rm(ps)
+
+ps_KEGG_RA <- transform(ps_KEGG, "compositional")
+ps_KEGG_RA
+
+ps_KEGG_RA <- subset_samples(ps_KEGG_RA, sampleID %in% keep)
+ps_KEGG_RA
+
+bray_dist_KEGG <- phyloseq::distance(ps_KEGG_RA, method = "bray")
+```
+
+
+
+
+
+```{r}
+setwd('C:\\Users\\lehakkin\\RStudio_computer')
+load(file = 'CAZyme_ps_COVERAGE_FINAL')#ps
+ps
+
+ps_CAZyme <- ps
+
+rm(ps)
+
+ps_CAZyme <- subset_samples(ps_CAZyme, sampleID %in% keep)
+
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_CAZyme),
+              MARGIN = ifelse(taxa_are_rows(ps_CAZyme), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_CAZyme = prune_taxa((prev0 > 0), ps_CAZyme)
+ps_CAZyme
+
+ps_CAZyme_RA <- transform(ps_CAZyme, "compositional")
+
+bray_dist_CAZyme <- phyloseq::distance(ps_CAZyme_RA, method = "bray")
+
+```
+
+Run partial mantel
+
+```{r}
+# Load required packages
+library(linkET)
+library(vegan)
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+library(ppcor)  # For partial correlations
+
+# Use the numerical Depth column from meta
+depth_numerical <- meta$`Depth (numerical)`
+
+# Check that it's numeric
+if(!is.numeric(depth_numerical)) {
+  depth_numerical <- as.numeric(as.character(depth_numerical))
+  warning("Converted Depth to numeric")
+}
+
+# First, ensure all distance matrices have matching samples
+common_samples <- Reduce(intersect, list(
+  labels(bray_dist_taxonomy),
+  labels(bray_dist_KEGG),
+  labels(bray_dist_CAZyme),
+  meta$sampleID
+))
+
+print(paste("Number of common samples:", length(common_samples)))
+
+# Function to subset distance matrices
+subset_dist <- function(dist_obj, common_samples) {
+  mat <- as.matrix(dist_obj)
+  mat_subset <- mat[common_samples, common_samples]
+  return(as.dist(mat_subset))
+}
+
+# Subset all distance matrices
+bray_dist_taxonomy_sub <- subset_dist(bray_dist_taxonomy, common_samples)
+bray_dist_KEGG_sub <- subset_dist(bray_dist_KEGG, common_samples)
+bray_dist_CAZyme_sub <- subset_dist(bray_dist_CAZyme, common_samples)
+
+# Create depth distance matrix from numerical Depth
+depth_vector <- depth_numerical[match(common_samples, meta$sampleID)]
+
+# Check for NAs in depth
+if(any(is.na(depth_vector))) {
+  print(paste("Found", sum(is.na(depth_vector)), "NAs in depth. Removing those samples."))
+  valid_depth <- !is.na(depth_vector)
+  depth_vector <- depth_vector[valid_depth]
+  common_samples <- common_samples[valid_depth]
+  
+  # Resubset distance matrices
+  bray_dist_taxonomy_sub <- subset_dist(bray_dist_taxonomy, common_samples)
+  bray_dist_KEGG_sub <- subset_dist(bray_dist_KEGG, common_samples)
+  bray_dist_CAZyme_sub <- subset_dist(bray_dist_CAZyme, common_samples)
+}
+
+depth_dist <- dist(depth_vector)
+
+# Remove Depth from env_df BEFORE subsetting
+env_df_no_depth <- env_df[, !colnames(env_df) %in% c("Depth (numerical)")]
+env_df_sub <- env_df_no_depth[common_samples, , drop = FALSE]
+
+# Create a list of all communities
+communities <- list(
+  Taxonomy = bray_dist_taxonomy_sub,
+  KEGG = bray_dist_KEGG_sub,
+  CAZyme = bray_dist_CAZyme_sub
+)
+
+# Run Partial Mantel tests controlling for depth
+mantel_all_results <- data.frame()
+
+for (community_name in names(communities)) {
+  bray_dist <- communities[[community_name]]
+  
+  for (i in 1:ncol(env_df_sub)) {
+    variable_name <- colnames(env_df_sub)[i]
+    
+    # Get the environmental variable
+    env_var <- env_df_sub[, i]
+    
+    # Find samples with non-NA values for this variable 
+    complete_idx <- which(!is.na(env_var))
+    
+    if(length(complete_idx) < 3) {
+      next
+    }
+    
+    # Subset all matrices to complete cases
+    bray_mat <- as.matrix(bray_dist)
+    bray_sub <- bray_mat[complete_idx, complete_idx]
+    bray_dist_sub <- as.dist(bray_sub)
+    
+    depth_sub <- depth_vector[complete_idx]
+    depth_dist_sub <- dist(depth_sub)
+    
+    env_dist_sub <- dist(env_var[complete_idx])
+    
+    # Run partial Mantel test
+    result <- tryCatch({
+      m_test <- mantel.partial(bray_dist_sub, env_dist_sub, depth_dist_sub,
+                               method = "pearson",
+                               permutations = 999,
+                               na.rm = TRUE)
+      
+      data.frame(
+        community = community_name,
+        variable = variable_name,
+        r = m_test$statistic,
+        p = m_test$signif,
+        n_used = length(complete_idx),
+        stringsAsFactors = FALSE
+      )
+    }, error = function(e) {
+      cat("Error in", community_name, variable_name, ":", e$message, "\n")
+      NULL
+    })
+    
+    if(!is.null(result)) {
+      mantel_all_results <- rbind(mantel_all_results, result)
+    }
+  }
+}
+
+# Adjust p-values separately for each community
+mantel_all_results <- mantel_all_results %>%
+  group_by(community) %>%
+  mutate(p_adj = p.adjust(p, method = "BH")) %>%
+  ungroup()
+
+print("All Partial Mantel results (controlling for depth):")
+print(mantel_all_results)
+
+# Calculate PARTIAL correlations among environmental variables (controlling for depth)
+# AND their significance
+env_vars <- colnames(env_df_sub)
+n_vars <- length(env_vars)
+partial_cor_matrix <- matrix(0, nrow = n_vars, ncol = n_vars)
+partial_p_matrix <- matrix(1, nrow = n_vars, ncol = n_vars)  # For p-values
+rownames(partial_cor_matrix) <- env_vars
+colnames(partial_cor_matrix) <- env_vars
+rownames(partial_p_matrix) <- env_vars
+colnames(partial_p_matrix) <- env_vars
+
+# Calculate partial correlations and p-values for each pair
+for (i in 1:n_vars) {
+  for (j in 1:n_vars) {
+    if (i == j) {
+      partial_cor_matrix[i, j] <- 1
+      partial_p_matrix[i, j] <- 0
+    } else if (i > j) {  # Only calculate once for each pair
+      # Find samples with complete data for both variables AND depth
+      complete_idx <- which(!is.na(env_df_sub[, i]) & 
+                            !is.na(env_df_sub[, j]) & 
+                            !is.na(depth_vector))
+      
+      if(length(complete_idx) > 3) {
+        # Create data frame with the two variables and depth
+        df_partial <- data.frame(
+          x = env_df_sub[complete_idx, i],
+          y = env_df_sub[complete_idx, j],
+          z = depth_vector[complete_idx]
+        )
+        
+        # Calculate partial correlation and p-value
+        tryCatch({
+          pcor_test <- pcor.test(df_partial$x, df_partial$y, df_partial$z)
+          partial_cor_matrix[i, j] <- pcor_test$estimate
+          partial_cor_matrix[j, i] <- pcor_test$estimate
+          partial_p_matrix[i, j] <- pcor_test$p.value
+          partial_p_matrix[j, i] <- pcor_test$p.value
+        }, error = function(e) {
+          # If error, use regular correlation
+          cat("Warning: Using regular correlation for", env_vars[i], "and", env_vars[j], "\n")
+          cor_test <- cor.test(df_partial$x, df_partial$y, use = "complete.obs")
+          partial_cor_matrix[i, j] <- cor_test$estimate
+          partial_cor_matrix[j, i] <- cor_test$estimate
+          partial_p_matrix[i, j] <- cor_test$p.value
+          partial_p_matrix[j, i] <- cor_test$p.value
+        })
+      } else {
+        # If insufficient data, use regular correlation with a warning
+        cat("Warning: Insufficient data for partial correlation between", 
+            env_vars[i], "and", env_vars[j], "- using regular correlation\n")
+        cor_test <- cor.test(env_df_sub[, i], env_df_sub[, j], 
+                             use = "pairwise.complete.obs")
+        partial_cor_matrix[i, j] <- cor_test$estimate
+        partial_cor_matrix[j, i] <- cor_test$estimate
+        partial_p_matrix[i, j] <- cor_test$p.value
+        partial_p_matrix[j, i] <- cor_test$p.value
+      }
+    }
+  }
+}
+
+# Adjust p-values for multiple testing (optional)
+partial_p_matrix_adj <- matrix(p.adjust(partial_p_matrix, method = "BH"), 
+                               nrow = n_vars, ncol = n_vars)
+rownames(partial_p_matrix_adj) <- env_vars
+colnames(partial_p_matrix_adj) <- env_vars
+
+# Create a matrix for significance stars
+sig_stars <- matrix("", nrow = n_vars, ncol = n_vars)
+sig_stars[partial_p_matrix_adj < 0.001] <- "***"
+sig_stars[partial_p_matrix_adj < 0.01 & partial_p_matrix_adj >= 0.001] <- "**"
+sig_stars[partial_p_matrix_adj < 0.05 & partial_p_matrix_adj >= 0.01] <- "*"
+sig_stars[partial_p_matrix_adj < 0.1 & partial_p_matrix_adj >= 0.05] <- "."
+# Leave empty for non-significant
+
+# Format Mantel results for plotting
+mantel_for_plot <- mantel_all_results %>%
+  mutate(spec = community,
+         env = variable,
+         rd = case_when(
+           abs(r) >= 0.4 ~ "≥0.4",
+           abs(r) >= 0.2 ~ "0.2-0.4",
+           TRUE ~ "<0.2"
+         ),
+         rd = factor(rd, levels = c("<0.2", "0.2-0.4", "≥0.4")),
+         pd = case_when(
+           p_adj < 0.01 ~ "< 0.01",
+           p_adj < 0.05 ~ "0.01 - 0.05",
+           TRUE ~ ">= 0.05"
+         ),
+         pd = factor(pd, levels = c("< 0.01", "0.01 - 0.05", ">= 0.05"))
+  ) %>%
+  dplyr::select(spec, env, r, p, rd, pd)
+
+###############
+
+```
+
+```{r}
+# Create a matrix for significance stars
+sig_stars <- matrix("", nrow = n_vars, ncol = n_vars)
+sig_stars[partial_p_matrix_adj < 0.001] <- "***"
+sig_stars[partial_p_matrix_adj < 0.01 & partial_p_matrix_adj >= 0.001] <- "**"
+sig_stars[partial_p_matrix_adj < 0.05 & partial_p_matrix_adj >= 0.01] <- "*"
+sig_stars[partial_p_matrix_adj < 0.1 & partial_p_matrix_adj >= 0.05] <- "."
+
+# Set upper triangle (including diagonal) to empty strings
+sig_stars[upper.tri(sig_stars, diag = TRUE)] <- ""
+
+# Convert to data frame with correct coordinates
+sig_stars_df <- data.frame(
+  x = rep(1:n_vars, each = n_vars),
+  y = rep(1:n_vars, times = n_vars),
+  label = as.vector(sig_stars),
+  stringsAsFactors = FALSE
+)
+
+# Filter out empty labels
+sig_stars_df <- sig_stars_df[sig_stars_df$label != "", ]
+
+# Ensure we only keep lower triangle (since plot type = "lower")
+sig_stars_df <- sig_stars_df[sig_stars_df$y > sig_stars_df$x, ]
+
+# Map the numeric coordinates to variable names for proper labeling
+sig_stars_df$x_name <- env_vars[sig_stars_df$x]
+sig_stars_df$y_name <- env_vars[sig_stars_df$y]
+
+# Create the plot with partial correlations and significance stars
+p <- qcorrplot(partial_cor_matrix, 
+               type = "lower", 
+               diag = FALSE,
+               is_corr = TRUE) +
+  geom_square() +
+  # Add significance stars - changed size from 5 to 3.5
+  geom_text(data = sig_stars_df,
+            aes(x = x_name, y = y_name, label = label),
+            color = "black", size = 3.5, fontface = "bold", 
+            inherit.aes = FALSE) +
+  geom_couple(aes(colour = pd, size = rd), 
+              data = mantel_for_plot, 
+              curvature = nice_curvature()) +
+  scale_fill_gradientn(colours = RColorBrewer::brewer.pal(11, "RdBu")) +
+  scale_size_manual(values = c(0.5, 1, 2)) +
+  scale_colour_manual(values = c("< 0.01" = "#8508DA",
+                                 "0.01 - 0.05" = "#E08D06",
+                                 ">= 0.05" = "grey35")) +
+  guides(
+    size = guide_legend(title = "Partial Mantel's r\n(controlling for depth)",
+                       override.aes = list(colour = "grey35"), 
+                       order = 2),
+    colour = guide_legend(title = "Partial Mantel's p (FDR)\n (controlling for depth)", 
+                         override.aes = list(size = 3), 
+                         order = 1),
+    fill = guide_colorbar(title = "Partial Pearson's r\n(controlling for depth)", 
+                         order = 3)
+  ) +
+  theme_minimal() +
+  theme(
+    # Remove all grid lines
+    panel.grid = element_blank(),
+    # Remove white background
+    panel.background = element_rect(fill = "transparent", color = NA),
+    plot.background = element_rect(fill = "transparent", color = NA),
+    # Optional: add a subtle border if you want
+    # panel.border = element_rect(fill = NA, color = "grey80", size = 0.5),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    plot.title = element_blank(),
+    plot.subtitle = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.ticks = element_blank(),  # Remove axis ticks if you want cleaner look
+    legend.position = "right",
+    legend.box = "vertical",
+    legend.background = element_rect(fill = "transparent", color = NA)
+  )
+
+print(p)
+
+
+```
+
+
+```{r}
+# View the partial correlation coefficients
+print("Partial correlation coefficients:")
+print(round(partial_cor_matrix, 3))
+
+# View the p-values (adjusted)
+print("Adjusted p-values:")
+print(round(partial_p_matrix_adj, 4))
+
+# View the significance stars matrix
+print("Significance stars:")
+print(sig_stars)
+```
+
+
+
+
+
+```{r}
+rm(list = ls())
+```
+
+
+
+
+
+

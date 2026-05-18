@@ -1,0 +1,1169 @@
+---
+title: "singleM"
+author: "Laura_Hakkinen"
+date: "2025-05-28"
+output: html_document
+---
+
+
+# singleM analysis of raw reads
+
+We will assess the prokaryotic diversity, Bray-Curtis based beta-diversity, and composition of prokaryotic phyla
+
+
+For alpha- and beta-diversity measures, we are using the S3.5.ribosomal_protein_S2_rpsB gene based phylotypes with 97% identity.
+
+# 1. Alpha-diversity
+
+
+## 1.1. Load data
+
+```{r}
+library('phyloseq')
+library("cowplot")
+library("dplyr")
+library("ggplot2")
+library("vegan")
+library("microbiome")
+library("tibble")
+library("readxl")
+library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(stringr)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer')
+
+# load the rpsB singleM data phyloseq object
+load(file = 'ps_clustered_97')#ps
+
+meta <- meta(ps)
+
+```
+
+
+## 1.2. Calculate diversity
+
+This is how we would calculate diversity, but as we have it in the data already let's not run it now
+
+```{r}
+#div <- microbiome::alpha(ps, index = "all")
+#div <- as.data.frame(div)
+#div$sampleID <- row.names(div)
+#meta <- left_join(meta, div, by = "sampleID")
+#meta <- as.data.frame(meta)
+#row.names(meta) <- meta$sampleID
+
+# Assign the estimatedmeta# Assign the estimated diversity to sample metadata
+#sample_data(ps) <- sample_data(meta)
+
+
+#meta <- meta(ps)
+```
+
+
+
+
+
+## 1.3. Plot diversity
+
+
+
+```{r}
+# create your own color palette for sample types
+MyPalette <- c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c")
+```
+
+
+### 1.3.1. Chao1
+
+```{r}
+
+# chao
+chao <- meta %>%
+  group_by(sample_type, depth_numerical) %>%
+  summarise(mean = mean(chao1, na.rm = TRUE), se = (sd(chao1, na.rm = TRUE)/sqrt(length((chao1))))) %>%
+  ungroup() %>%
+  ggplot(aes(y=mean, depth_numerical, color=sample_type)) +
+  geom_line(linetype = "dashed") +
+  geom_point(size=3, position=position_dodge(1.2)) +
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.5, position=position_dodge(1.2)) + coord_flip() + scale_x_reverse() + theme(plot.title = element_text(size = 20, hjust = 0.5)) + theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) + theme_cowplot() +
+  theme(axis.text = element_text(size=16),
+        axis.title = element_text(size=16),
+        legend.text = element_text(size=16),
+        legend.title = element_text(size=16),
+        title = element_text(size=18)) +
+  scale_y_continuous(name="Prokaryotic chao1") +
+  labs(x = "depth") + theme(legend.title = element_blank()) + scale_colour_manual(values = MyPalette)
+
+chao <- chao + scale_x_reverse(breaks = c(60, 35, 25, 15, 5), labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")) + theme(axis.title.y = element_blank())
+
+print(chao)
+
+```
+
+
+
+
+
+### 1.3.2. Shannon
+
+```{r}
+# shannon
+shannon <- meta %>%
+  dplyr::group_by(sample_type, depth_numerical) %>%
+  dplyr::summarise(mean = mean(shannon, na.rm = TRUE), se = (sd(shannon, na.rm = TRUE)/sqrt(length((shannon))))) %>%
+  dplyr::ungroup() %>%
+  ggplot(aes(y=mean, depth_numerical, color=sample_type)) +
+  geom_line(linetype = "dashed") +
+  geom_point(size=3, position=position_dodge(1.2)) +
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.5, position=position_dodge(1.2)) + coord_flip() + scale_x_reverse() + theme(plot.title = element_text(size = 20, hjust = 0.5)) + theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) + theme_cowplot() +
+  theme(axis.text = element_text(size=16),
+        axis.title = element_text(size=16),
+        legend.text = element_text(size=18),
+        legend.title = element_text(size=16),
+        title = element_text(size=18)) +
+  scale_y_continuous(name="Prokaryotic Shannon") +
+  labs(x = "depth") + theme(legend.title = element_blank()) + scale_colour_manual(values = MyPalette)
+
+shannon <- shannon + scale_x_reverse(breaks = c(60, 35, 25, 15, 5), labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm"))+ theme(axis.title.y = element_blank())
+
+shannon
+```
+
+### 1.3.3. Richness
+
+```{r}
+
+# richness
+rich <- meta %>%
+  group_by(sample_type, depth_numerical) %>%
+  summarise(mean = mean(observed, na.rm = TRUE), se = (sd(observed, na.rm = TRUE)/sqrt(length((observed))))) %>%
+  ungroup() %>%
+  ggplot(aes(y=mean, depth_numerical, color=sample_type)) +
+  geom_line(linetype = "dashed") +
+  geom_point(size=3, position=position_dodge(1.2)) +
+  geom_errorbar(aes(ymin=mean-se, ymax=mean+se), width=.5, position=position_dodge(1.2)) + coord_flip() + scale_x_reverse() + theme(plot.title = element_text(size = 20, hjust = 0.5)) + theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) + theme_cowplot() +
+  theme(axis.text = element_text(size=16),
+        axis.title = element_text(size=16),
+        legend.text = element_text(size=16),
+        legend.title = element_text(size=16),
+        title = element_text(size=18)) +
+  scale_y_continuous(name="Prokaryotic richness") +
+  labs(x = "depth") + theme(legend.title = element_blank()) + scale_colour_manual(values = MyPalette)
+
+rich <- rich + scale_x_reverse(breaks = c(60, 35, 25, 15, 5), labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")) + theme(axis.title.y = element_blank())
+
+print(rich)
+
+```
+
+
+
+
+# 1.4. Test alpha-diversity
+
+Let's focus on Chao1
+
+## 1.4.1. between management types in all soil layers
+
+
+Change depth and richness measure accordingly
+
+Test these:
+- chao1
+- shannon
+
+
+```{r}
+library("multcomp")
+library(car)
+
+means_and_ses <- list()
+
+meta$depth <- as.factor(meta$depth)
+rich <-c("chao1", "shannon")
+
+for (i in rich) {
+  for (j in levels(meta$depth)) {
+    df <- filter(meta, depth==j)
+    
+     print(i)
+     print(j)
+     # Levene's test for homogeneity of variance
+    result <- leveneTest(df[[i]] ~ sample_type, data = df)
+    print(result)
+     
+    # Kruskal-Wallis test
+    k <- kruskal.test(df[[i]] ~ sample_type, data = df)
+    print(k)
+    
+    # Pairwise Wilcoxon test
+    w <- pairwise.wilcox.test(df[[i]], df$sample_type, p.adjust.method = "BH")
+    print(w)
+    
+     # ANOVA
+    res.aov <- aov(df[[i]] ~ sample_type, data = df)
+    aov_summary <- summary(res.aov)
+    print(aov_summary)
+    
+    # Tukey's HSD test
+    tukey <- TukeyHSD(res.aov)
+    print(tukey)
+    
+    # Group by and summarize
+    mean_and_se <- df %>%
+      group_by(sample_type) %>%
+      summarise(mean = mean(!!sym(i), na.rm = TRUE), se = sd(!!sym(i), na.rm = TRUE) / sqrt(n()))
+  
+    # Store the result in the list with a descriptive name
+    result_name <- paste("depth", j, "diversity", i, sep = "_")
+    means_and_ses[[result_name]] <- mean_and_se
+    
+  }
+}
+
+# Combine list into a single dataframe
+combined_df <- bind_rows(lapply(names(means_and_ses), function(name) {
+  df <- means_and_ses[[name]]
+  df$result_name <- name
+  return(df)
+}), .id = "id")
+
+
+```
+
+
+
+--> All where homogenous so I can just do the anova and tukey tests
+
+Lets run again to get a results table with CLD characters:
+
+
+```{r}
+library(multcomp)
+library(lsmeans)
+
+# Initialize an empty dataframe to store results
+results_df <- data.frame(depth = character(),
+                         sample_type = character(),
+                         diversity = character(),
+                         ANOVA_p = numeric(),
+                         mean_se_cld = character(),
+                         stringsAsFactors = FALSE)
+
+# Get unique depth levels
+depths <- unique(meta$depth)
+
+# Loop through each depth
+for (d in depths) {
+  # Subset data for current depth
+  depth_data <- meta[meta$depth == d, ]
+  
+  # Loop through each diversity measure
+  for (div in c("chao1", "shannon")) {
+    # Perform ANOVA
+    formula <- as.formula(paste(div, "~ sample_type"))
+    res.aov <- aov(formula, data = depth_data)
+    
+    # Get ANOVA p-value
+    anova_p <- summary(res.aov)[[1]]$"Pr(>F)"[1]
+    
+    # Perform Tukey HSD if ANOVA is significant (p < 0.05)
+    if (anova_p < 0.05) {
+      tukey <- glht(res.aov, linfct = mcp(sample_type = "Tukey"))
+      cld_result <- cld(tukey)
+      letters <- cld_result$mcletters$Letters
+    } else {
+      # If not significant, all groups get the same letter
+      groups <- unique(depth_data$sample_type)
+      letters <- setNames(rep("a", length(groups)), groups)
+    }
+    
+    # Calculate mean and SE for each sample_type
+    means <- tapply(depth_data[[div]], depth_data$sample_type, mean, na.rm = TRUE)
+    ses <- tapply(depth_data[[div]], depth_data$sample_type, 
+                 function(x) sd(x, na.rm = TRUE)/sqrt(length(na.omit(x))))
+    
+    # Create mean_se_cld strings
+    mean_se_cld <- paste0(round(means, 1), "±", round(ses, 1), letters[names(means)])
+    
+    # Create temporary dataframe for current results
+    temp_df <- data.frame(
+      depth = d,
+      sample_type = names(means),
+      diversity = div,
+      ANOVA_p = anova_p,
+      mean_se_cld = mean_se_cld,
+      stringsAsFactors = FALSE
+    )
+    
+    # Append to results dataframe
+    results_df <- rbind(results_df, temp_df)
+  }
+}
+
+# Reset row names
+rownames(results_df) <- NULL
+```
+
+
+
+No differences between treatments within any of the soil layers!
+
+
+
+## 1.4.2. between soil layers within all treatments
+
+
+```{r}
+library("multcomp")
+library(car)
+
+
+means_and_ses <- list()
+
+meta$sample_type <- as.factor(meta$sample_type)
+rich <-c("chao1", "shannon")
+
+for (i in rich) {
+  for (j in levels(meta$sample_type)) {
+    df <- filter(meta, sample_type==j)
+    
+     print(i)
+     print(j)
+     # Levene's test for homogeneity of variance
+    result <- leveneTest(df[[i]] ~ depth, data = df)
+    print(result)
+     
+    # Kruskal-Wallis test
+    k <- kruskal.test(df[[i]] ~ depth, data = df)
+    print(k)
+    
+    # Pairwise Wilcoxon test
+    w <- pairwise.wilcox.test(df[[i]], df$depth, p.adjust.method = "BH")
+    print(w)
+    
+     # ANOVA
+    res.aov <- aov(df[[i]] ~ depth, data = df)
+    aov_summary <- summary(res.aov)
+    print(aov_summary)
+    
+    # Tukey's HSD test
+    tukey <- TukeyHSD(res.aov)
+    print(tukey)
+    
+    # Group by and summarize
+    mean_and_se <- df %>%
+      group_by(depth) %>%
+      summarise(mean = mean(!!sym(i), na.rm = TRUE), se = sd(!!sym(i), na.rm = TRUE) / sqrt(n()))
+  
+    # Store the result in the list with a descriptive name
+    result_name <- paste("sample_type", j, "diversity", i, sep = "_")
+    means_and_ses[[result_name]] <- mean_and_se
+    
+  }
+}
+
+# Combine list into a single dataframe
+combined_df <- bind_rows(lapply(names(means_and_ses), function(name) {
+  df <- means_and_ses[[name]]
+  df$result_name <- name
+  return(df)
+}), .id = "id")
+
+
+```
+
+
+
+--> All were homogenuous so I can just do the anova and tukey tests
+
+Lets run again:
+
+
+```{r}
+library(multcomp)
+library(lsmeans)
+
+# Initialize an empty dataframe to store results
+results_df <- data.frame(sample_type = character(),
+                         depth = character(),
+                         diversity = character(),
+                         ANOVA_p = numeric(),
+                         mean_se_cld = character(),
+                         stringsAsFactors = FALSE)
+
+# Get unique sample_type levels
+sample_types <- unique(meta$sample_type)
+
+# Loop through each sample_type
+for (d in sample_types) {
+  # Subset data for current sample_type
+  sample_type_data <- meta[meta$sample_type == d, ]
+  
+  # Loop through each diversity measure
+  for (div in c("chao1", "shannon")) {
+    # Perform ANOVA
+    formula <- as.formula(paste(div, "~ depth"))
+    res.aov <- aov(formula, data = sample_type_data)
+    
+    # Get ANOVA p-value
+    anova_p <- summary(res.aov)[[1]]$"Pr(>F)"[1]
+    
+    # Perform Tukey HSD if ANOVA is significant (p < 0.05)
+    if (anova_p < 0.05) {
+      tukey <- glht(res.aov, linfct = mcp(depth = "Tukey"))
+      cld_result <- cld(tukey)
+      letters <- cld_result$mcletters$Letters
+    } else {
+      # If not significant, all groups get the same letter
+      groups <- unique(sample_type_data$depth)
+      letters <- setNames(rep("a", length(groups)), groups)
+    }
+    
+    # Calculate mean and SE for each depth
+    means <- tapply(sample_type_data[[div]], sample_type_data$depth, mean, na.rm = TRUE)
+    ses <- tapply(sample_type_data[[div]], sample_type_data$depth, 
+                 function(x) sd(x, na.rm = TRUE)/sqrt(length(na.omit(x))))
+    
+    # Create mean_se_cld strings
+    mean_se_cld <- paste0(round(means, 1), "±", round(ses, 1), letters[names(means)])
+    
+    # Create temporary dataframe for current results
+    temp_df <- data.frame(
+      sample_type = d,
+      depth = names(means),
+      diversity = div,
+      ANOVA_p = anova_p,
+      mean_se_cld = mean_se_cld,
+      stringsAsFactors = FALSE
+    )
+    
+    # Append to results dataframe
+    results_df <- rbind(results_df, temp_df)
+  }
+}
+
+# Reset row names
+rownames(results_df) <- NULL
+```
+
+
+
+
+# 2. Beta-diversity
+
+
+```{r}
+ps_RA <- microbiome::transform(ps, "compositional")
+```
+
+
+Let's first quickly see how the ordination looks. Later, let's use better color options.
+
+```{r}
+OTU = as(otu_table(ps_RA), "matrix")
+# transpose if necessary
+if(taxa_are_rows(ps_RA)){OTU <- t(OTU)}
+# Coerce to data.frame
+OTU = as.data.frame(OTU)
+OTU <- as.matrix(OTU)
+
+bray_dist <- vegan::vegdist(OTU, method="bray")
+str(bray_dist)
+
+# use k = 3 so we'll get calculations for three axes
+pcoa <- cmdscale(bray_dist, eig=TRUE, k = 3)
+ordiplot(scores(pcoa),display="sites", type="points")
+```
+
+## 2.1. PCoA
+
+Let's first make PCoA ordination with axes 1 and 2.
+
+### 2.1.1. Env. variables
+
+```{r}
+# Post-Hoc Projections of environmental variables
+# envfit in vegan projects points onto vectors that have maximum correlation with corresponding environmental variables
+pcoa.env12 <- envfit(pcoa, meta[ ,c("pH_H2O", "EC_uScm", "C_g_per_kg", "N_gkg", "TP_gkg", "sample_type", "depth_numerical", "DOC_mgkg", "Pinorg_mgkg", "Porg_mgkg", "log_root", "C_per_N", "Feox_mmolkg", "Alox_mmolkg", "oxides_mmolkg", "PH2O_mgkg")], na.rm = TRUE, choices=c(1:2), permutations = 999)
+
+
+# main effects
+pcoa.env12
+
+ef12.adj <- pcoa.env12
+pvals.adj <- p.adjust (pcoa.env12$vectors$pvals, method = 'bonferroni')
+ef12.adj$vectors$pvals <- pvals.adj
+ef12.adj
+
+```
+
+
+To plot (classical) mds (which is equivalent to PCoA) with ggplot a new datasheet needs to be created which contains the x,y points for each site. You can do this by calling the scores of you mds.
+
+
+```{r}
+site.scrs <- as.data.frame(scores(pcoa, display = "sites")) #save pcoa results into dataframe
+site.scrs <- cbind(site.scrs, soil_type = meta$sample_type) #add grouping variable "soil_type" to dataframe
+site.scrs <- cbind(site.scrs, depth = meta$depth) #add grouping variable of depth
+
+head(site.scrs)
+```
+
+
+I will be following somewhat this tutorial for fitting the environmental variables etc:
+
+[jkzorz github](https://jkzorz.github.io/2020/04/04/NMDS-extras.html)
+
+To show environmental extrinsic variables another datasheet needs to be created
+
+Citation from the [jkzorz github](https://jkzorz.github.io/2020/04/04/NMDS-extras.html)
+
+*"Extracting the required information from the envfit result is a bit more complicated. The envfit output contains information on the length of the segments for each variable. The segments are scaled to the r2 value, so that the environmental variables with a longer segment are more strongly correlated with the data than those with a shorter segment. You can extract this information with scores. Then these lengths are further scaled to fit the plot. This is done with a multiplier that is analysis specific, and can be accessed using the command ordiArrowMul(en). Below I multiply the scores by this multiplier to keep the coordinates in the correct proportion."*
+
+Because my data contained continuous and categorical environmental variables, I am extracting the information from both separately using the vectors and factors options respectively.
+
+### 2.1.2 Categorial and continuous variables
+
+```{r}
+
+# first categorial variables
+env.scores_cat12 <- as.data.frame(scores(pcoa.env12, display = "factors"))*0.25 # multiply the envfit scores to keep them in the frame of the ordination
+env.scores_cat12 <- cbind(env.scores_cat12, env.variables = rownames(env.scores_cat12)) #and then gives them their names
+
+env.scores_cat12 <- cbind(env.scores_cat12, pval = pcoa.env12$factors$pvals) # add pvalues to dataframe
+sig.env.scores_cat12 <- subset(env.scores_cat12, pval<=0.05) #subset data to show variables significant at 0.05
+sig.env.scores_cat12
+# all were significant
+
+
+# then continous variables
+env.scores_cont12 <- as.data.frame(scores(pcoa.env12, display = "vectors"))*0.25 # multiply the envfit scores to keep them in the frame of the ordination
+env.scores_cont12 <- cbind(env.scores_cont12, env.variables = rownames(env.scores_cont12)) #and then gives them their names
+
+env.scores_cont12 <- cbind(env.scores_cont12, pval = pcoa.env12$vectors$pvals) # add pvalues to dataframe
+sig.env.scores_cont12 <- subset(env.scores_cont12, pval<=0.05) #subset data to show variables significant at 0.05
+sig.env.scores_cont12
+# all were significant
+```
+
+
+
+Now we have the relevant information for plotting the ordination in ggplot
+
+
+```{r}
+MyPalette <- c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c")
+
+site.scrs$new_depth <- site.scrs$depth
+
+site.scrs$new_depth <- gsub("...", "-", site.scrs$new_depth, fixed = TRUE)
+
+site.scrs$new_depth[site.scrs$new_depth=="40-"] <- "40-80"
+
+site.scrs$new_depth[site.scrs$new_depth=="0-10"] <- "0-10 cm"
+site.scrs$new_depth[site.scrs$new_depth=="10-20"] <- "10-20 cm"
+site.scrs$new_depth[site.scrs$new_depth=="20-30"] <- "20-30 cm"
+site.scrs$new_depth[site.scrs$new_depth=="30-40"] <- "30-40 cm"
+site.scrs$new_depth[site.scrs$new_depth=="40-80"] <- "40-80 cm"
+```
+
+
+The phyloseq package PCoA gives the axis %
+
+```{r}
+#First lets run the PCoA with phyloseq to get the axis percentages (plot_ordination gives axis percentages)
+
+GP.ord <- ordinate(ps_RA, "PCoA", "bray")
+p2 = plot_ordination(ps_RA, GP.ord, type="samples", color="sample_type", shape="depth")
+p2
+```
+
+Remember to change the axis percentages accordingly below!!!
+
+
+
+### 2.1.3. Plot PCoA
+
+
+```{r}
+pcoa.plot <- ggplot() + geom_point(data=site.scrs, aes(Dim1, Dim2, colour = factor(site.scrs$soil_type), shape = factor(site.scrs$new_depth)), size = 6, alpha = 0.6, stroke = 1.5) + theme_cowplot() + theme(panel.background = element_rect(fill = NA, colour = "black", size = 1, linetype = "solid")) + labs(colour = "", shape = "") + theme(legend.text = element_text(size = 12), axis.text = element_text(size = 16)) + scale_colour_manual(values = MyPalette) + labs(y = "PCoA2 (4.1%)", x = "PCoA1 (11.2%)")
+
+
+pcoa.plot
+
+```
+
+
+### 2.1.4. Add env. variables to the PCoA
+
+First, simplify the names
+
+
+```{r}
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "pH_H2O"] <- "pH"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "C_g_per_kg"] <- "C"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "N_gkg"] <- "N"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "TP_gkg"] <- "P-tot"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "depth_numerical"] <- "Depth"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "DOC_mgkg"] <- "DOC"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "Porg_mgkg"] <- "P-org"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "log_root"] <- "log root"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "C_per_N"] <- "C/N"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "Feox_mmolkg"] <- "Fe-ox"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "Alox_mmolkg"] <- "Al-ox"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "depth"] <- "Depth"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "log root"] <- "Root biomass"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "S_mg_per_kg"] <- "S"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "Mn_mg_per_kg"] <- "Mn"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "PH2O_mgkg"] <- "P-H2O"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "POM_C_percent"] <- "POM-C"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "MAOM_C_percent"] <- "MAOM-C"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "oxides_mmolkg"] <- "Oxides"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "EC_uScm"] <- "EC"
+```
+
+
+
+...then plot
+
+
+
+
+
+```{r fig.dim = c(12, 12)}
+p2 <- pcoa.plot +
+  geom_segment(aes(x = 0, y = 0, xend = Dim1, yend = Dim2), data = sig.env.scores_cont12, size =1, alpha = 0.5, colour = "grey30") + ggrepel::geom_text_repel(data = sig.env.scores_cont12, aes(x = Dim1, y = Dim2), colour = "blue", fontface = "bold", label = sig.env.scores_cont12$env.variables, segment.size = 0.2, box.padding = unit(0.1, "lines"), point.padding = (0.1), force = 1, max.time = 30, nudge_y = 0.00, nudge_x = 0.00) + theme(legend.position = c(0.05, 0.3), legend.text = element_text(size = 12))
+
+p2
+```
+
+
+
+## 2.2. PERMANOVA
+
+
+
+### 2.2.1. Calculate Bray-Curtis (dis)similarities
+
+```{r}
+ps_RA_bray <- phyloseq::distance(ps_RA, method = "bray")
+```
+
+
+### 2.2.2. Homogenity of variances
+
+Check that variance homogeneity assumptions hold (to ensure the reliability of the results). If  groups have signif. different spreads the permanova result may be potentially explained by that, rtaher than the groups.
+
+Betadisper first calculates the average distance of group members to the group centroid in multivariate space (generated by a distance matrix). Then, an ANOVA is done to test if the dispersions (variances) of groups are different.
+
+
+
+for management type
+
+```{r}
+anova(betadisper(ps_RA_bray, meta$sample_type))
+```
+         
+
+We see that the ANOVA p-value is not significant meaning that the **homogeneity of variance assumption is met**
+
+
+
+for depth
+
+```{r}
+anova(betadisper(ps_RA_bray, meta$depth))
+```
+
+We see that the ANOVA p-value is  significant meaning that **homogeneity of variance assumption is *NOT* met**
+
+lets do post hoc analysis with Tukey's test to see which groups differ in relation to their variances
+
+```{r}
+TukeyHSD(betadisper(ps_RA_bray, meta$depth))
+```
+
+Dispersions differ significantly between 30-40 and the ones above it
+
+It is not a problem, because I am not interested of comparing layers.
+
+
+### 2.2.3. Run initial PERMANOVAs
+
+First, I will do PERMANOVA so that I include all management types (later without forest)
+
+
+```{r}
+# first with just soil type and strata option
+adonis2(formula = ps_RA_bray~ sample_type, data = meta, permutations = 9999, method = "bray", by = "margin", strata = meta$depth)
+```
+
+Significant
+
+Without forest
+
+```{r}
+# subset samples
+ps_x <- subset_samples(ps_RA, sample_type != "forest")
+meta_subset <- meta(ps_x)
+
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_x),
+              MARGIN = ifelse(taxa_are_rows(ps_x), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_x = prune_taxa((prev0 > 0), ps_x)
+ps_x
+
+b <- phyloseq::distance(ps_x, method = "bray")
+
+
+set.seed(777)
+
+final <- adonis2(formula = b ~ sample_type, data = meta_subset, permutations = 9999, method = "bray", by = "margin", strata = meta_subset$depth)
+final
+
+```
+
+Significant also without forest
+
+
+
+
+Depth
+
+```{r}
+# then with just depth and strata option
+adonis2(formula = ps_RA_bray~ depth, data = meta, permutations = 9999, method = "bray", by = "margin", strata = meta$sample_type)
+```
+
+Depth has a larger effect than treatment (sample_type). So, let's put it first in the model
+
+### 2.2.4. Run final PERMANOVA
+
+Depth*Treatment
+
+For the full model it matters which "by" option we choose. When by="terms" significance for each term is calculated sequentially from first to last, so that the order of terms matter. We will use this, because with sequential analysis we will get R2 values that sum up to 1, and will also get the significance and R2 values for each interaction term separately rather than for the interaction alone.
+
+
+```{r}
+final <- adonis2(formula = ps_RA_bray ~ depth * sample_type, data = meta, permutations = 9999, method = "bray", by = "terms")
+final
+```
+
+Interaction is significant
+
+
+
+
+
+
+
+
+## 2.3. Add PERMANOVA results to PCoA
+
+
+
+
+
+
+```{r}
+library(ggpubr) ## for getting stat_regline_equation
+library("ggpmisc")
+
+rpsB <- p2 + 
+  annotate(
+    geom = "text",
+    x = -0.27,
+    y = 0.17,
+    label = "PERMANOVA \nSoil layer:Treatment: R²=0.11; p<0.001 \nSoil layer: R²=0.10; p<0.001 \nTreatment R² = 0.04; p<0.001 \nModel R² = 0.25",
+    hjust = 0,
+    size = 4  # Increase this value until text matches your desired size (default is 3.88)
+  )
+
+rpsB
+```
+
+
+
+
+
+
+
+
+
+
+
+# 3. Taxonomic composition
+
+For the phyla composition; we will be using the singleM data with all the single-copy marker genes (results from singleM profile pipeline), as this gives a better taxonomic assignment than just one gene (rpsB gene above)
+
+First let's clear the environment and load the data with all the genes
+
+```{r}
+rm(list = ls())
+```
+
+
+```{r}
+library('phyloseq')
+library("cowplot")
+library("dplyr")
+library("ggplot2")
+library("vegan")
+library("microbiome")
+library("tibble")
+library("readxl")
+library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(stringr)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer')
+
+load(file='ps_profile_Phyla')
+
+meta <- meta(ps)
+```
+
+
+
+
+
+I need to remove the unassigned samples, they are non-bacterial seqs and could not be identified well enough with the singleM pipeline
+
+```{r}
+ps <- subset_taxa(ps, domain!="unassigned")
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps),
+              MARGIN = ifelse(taxa_are_rows(ps), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps = prune_taxa((prev0 > 0), ps)
+```
+
+
+## 3.1. Phyla composition barplot
+
+```{r fig.dim = c(10, 5)}
+ps_RA <- transform(ps, "compositional")
+ps_RA <- microbiome::aggregate_rare(ps_RA, level = 'phylum', detection = 3/140, prevalence = 3/140)
+
+#create data table
+ps_RA_phyla_df <-  psmelt(ps_RA)
+
+ps_RA_phyla_df$sample_type <- factor(ps_RA_phyla_df$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+
+
+
+#Create color palette
+cbbPalette <- c("#b2b2b2",  "#8DD3C7",  "#FFED6F", "#239FD7",  "#F0D1E1",  "#FF6199", "#FF8DB5", "#C191C2",  "#BCD868",  "#FFFFC6", "#D0D9CD",  "#03B7EF", "#C66542",  "#8BC081",  "#EE9A04",  "deeppink", "#F68378",  "#8D6942", "#8DD3C7", "#F3B962", "#BCD868", "#6E99BE", "#F0D1E1", "#C191C2", "#FFFFC6", "darkgreen", "#D0D9CD","#FF8DB5", "#8BC081",  "#b71c1c", "deeppink", "#d6849a", "darkolivegreen1")
+
+
+sampletype_names <- list(
+  'forest' = "forest", 'meadow' = "meadow", 'organic' = "organic", 'conventional' = "conventional"
+)
+
+
+
+# check unique values for phylum
+unique(ps_RA_phyla_df$phylum)
+
+#ps_RA_phyla_df$phylum[ps_RA_phyla_df$phylum=="unassigned"] <- "Unassigned"
+
+ps_RA_phyla_df$phylum <- as.factor(ps_RA_phyla_df$phylum)
+levels(ps_RA_phyla_df$phylum)
+
+ps_RA_phyla_df$phylum <- factor(ps_RA_phyla_df$phylum, levels = c("Other", "Acidobacteriota", "Actinomycetota", "Bacteroidota", "Chloroflexota", "Desulfobacterota", "Desulfobacterota_B", "Gemmatimonadota", "Methylomirabilota", "Myxococcota", "Nitrospirota", "Patescibacteriota", "Planctomycetota", "Pseudomonadota", "Thermoproteota", "Verrucomicrobiota"))
+
+levels(ps_RA_phyla_df$phylum)
+
+# Make new depth variable
+ps_RA_phyla_df$Depth <- ps_RA_phyla_df$depth
+
+ps_RA_phyla_df$Depth <- gsub("...", "-", ps_RA_phyla_df$Depth, fixed = TRUE)
+
+ps_RA_phyla_df$Depth[ps_RA_phyla_df$Depth=="40-"] <- "40-80"
+
+
+ps_RA_phyla_df$Depth[ps_RA_phyla_df$Depth=="0-10"] <- "0-10 cm"
+ps_RA_phyla_df$Depth[ps_RA_phyla_df$Depth=="10-20"] <- "10-20 cm"
+ps_RA_phyla_df$Depth[ps_RA_phyla_df$Depth=="20-30"] <- "20-30 cm"
+ps_RA_phyla_df$Depth[ps_RA_phyla_df$Depth=="30-40"] <- "30-40 cm"
+ps_RA_phyla_df$Depth[ps_RA_phyla_df$Depth=="40-80"] <- "40-80 cm"
+
+#Create a plot
+phylumF  <- ggplot(ps_RA_phyla_df, aes(x = Depth ,y = Abundance, fill = phylum)) + geom_bar(stat="identity", position="fill") + scale_fill_manual(values = cbbPalette) + facet_grid (cols = vars(sample_type)) + geom_bar(stat="identity", position="fill") + scale_fill_manual(values = cbbPalette) + theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) + theme_cowplot() +
+  theme(axis.text = element_text(size=14),
+        axis.title = element_text(size=18),
+        legend.text = element_text(size=16),
+        legend.title = element_text(size=18),
+        legend.spacing.y = unit(0, 'cm'),
+        legend.key.size = unit(0.8, 'cm'),
+        title = element_text(size=18))+ theme(axis.text.x = element_text(angle = 45, hjust = 1)) + guides(fill = guide_legend(title="")) + theme(strip.text.x = element_text(size = 22)) +
+  ylab(label = "Relative abundance") + theme(legend.position="right") +  xlab("Soil layer")
+
+phylumF
+```
+
+
+
+## 3.2. Most common phyla
+
+```{r}
+
+ps_RA <- transform(ps, "compositional")
+ps_RA <- microbiome::aggregate_rare(ps_RA, level = 'phylum', detection = 0/140, prevalence = 0/140)
+
+#create data table
+ps_RA_phyla_df <-  psmelt(ps_RA)
+
+ps_RA_phyla_df$sample_type <- factor(ps_RA_phyla_df$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+
+MySummary <- ps_RA_phyla_df %>%
+  group_by(phylum, depth) %>%
+  summarize(mean_abund = mean(Abundance, na.rm=TRUE)) 
+MySummary
+```
+
+same without forest
+
+```{r}
+ps.x <- subset_samples(ps, sample_type!="forest")
+ps.x_RA <- transform(ps.x, "compositional")
+ps.x_RA <- microbiome::aggregate_rare(ps.x_RA, level = 'phylum', detection = 0/140, prevalence = 0/140)
+
+
+#create data table
+ps_RA_phyla_df <-  psmelt(ps.x_RA)
+
+ps_RA_phyla_df$sample_type <- factor(ps_RA_phyla_df$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+
+MySummary <- ps_RA_phyla_df %>%
+  group_by(phylum, sample_type) %>%
+  summarize(mean_abund = mean(Abundance, na.rm=TRUE)) 
+MySummary
+```
+
+
+
+
+## 3.3. Differential abundance analysis: MaAsLin2
+
+I need to have the phylum name in the taxa names in the phyloseq object  (now it is just phylum 1, phylum2, etc)
+
+```{r}
+tax <- as.data.frame(tax_table(ps))
+
+tax$name <- row.names(tax)
+x <- tax[, c(2,3)]
+
+otu <- as.data.frame(otu_table(ps))
+otu$name <- row.names(otu)
+
+otu <- left_join(otu, x, by="name")
+row.names(otu) <- otu$phylum
+otu <- as.data.frame(otu)
+otu <- subset(otu, select = -c(name, phylum))
+
+
+row.names(tax) <- NULL
+row.names(tax) <- tax$phylum
+tax <- subset(tax, select = -c(name))
+
+meta <- meta(ps)
+
+# make all the elements, OTU, TAX and samples, into phyloseq compatible format
+samples <- sample_data(meta)
+OTU <- as.matrix(otu)
+OTU <- otu_table(OTU, taxa_are_rows = TRUE)
+tax <- tax_table(as.matrix(tax))
+
+# finally combine all the elemnt to make a phyloseq object
+ps <- phyloseq(OTU, tax, samples)
+```
+
+
+
+
+
+MaAsLin2 (Microbiome Multivariate Analysis)
+Handles relative abundance data.
+
+Works with generalized linear models (GLMs).
+
+
+I will exclude the forest.
+
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+ps_RA
+  
+#To remove those from your phyloseq object
+ps_y <- subset_samples(ps_RA, sample_type!="forest")
+#This will return a ps object with the samples removed
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_y),
+              MARGIN = ifelse(taxa_are_rows(ps_y), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_y = prune_taxa((prev0 > 0), ps_y)
+
+```
+
+### 3.3.1. with Meadow
+
+```{r}
+# Run MaAsLin2
+library(Maaslin2)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer\\READ_MaAsLin2')
+
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+# This is how the analysis would be run:
+
+#fit_data <- Maaslin2(
+#  input_data = gene_data,
+#  input_metadata = metadata,
+#  output = "maaslin_RA_CLR_PHYLA_NoForest_READ_BASED_Phyla",
+#  fixed_effects = c('Layer', 'Treatment'), # my grouping variable(s)
+#  normalization = "NONE",          # no 
+#  transform = "NONE",             # No extra transform (data is already proportional)
+#  analysis_method = "CPLM",
+#  correction = "BH",               # Benjamini-Hochberg FDR correction
+#  plot_heatmap = TRUE,
+#  reference = 'Treatment,Meadow'
+#  )
+
+```
+
+
+
+
+
+### 3.3.2. MaAsLin2 without meadow
+
+We will also run without the meadow to be able to compare the organic and conventional to each other
+
+```{r}
+#To remove those from your phyloseq object
+ps_y <- subset_samples(ps_RA, sample_type!="forest" & sample_type!="meadow")
+#This will return a ps object with the samples removed
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_y),
+              MARGIN = ifelse(taxa_are_rows(ps_y), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_y = prune_taxa((prev0 > 0), ps_y)
+
+```
+
+
+
+
+```{r}
+# Run MaAsLin2
+library(Maaslin2)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer\\READ_MaAsLin2')
+
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+#fit_data <- Maaslin2(
+#  input_data = gene_data,
+#  input_metadata = metadata,
+#  output = "maaslin_RA_CLR_PHYLA_NoForest_READ_BASED_Phyla_WO_MEADOW",
+#  fixed_effects = c('Layer', 'Treatment'), # my grouping variable(s)
+#  normalization = "NONE",          # no 
+#  transform = "NONE",             # No extra transform (data is already proportional)
+#  analysis_method = "CPLM",
+#  correction = "BH",               # Benjamini-Hochberg FDR correction
+#  plot_heatmap = TRUE,
+#  reference = 'Treatment,Conventional'
+#  )
+
+```
+
+
+
+
+```{r}
+rm(list = ls())
+```
+
+
+
+
+
+
+

@@ -1,0 +1,901 @@
+---
+title: "Untitled"
+output: html_document
+date: "2025-12-17"
+---
+
+
+
+# Phyla encoding KEGG and CAZyme genes
+
+Let's see which taxa (phyla) are encoding the KEGG and CAZyme genes and if they are differently represesnted
+
+
+# 1. KEGG
+
+## 1.1. Load KEGG data
+
+
+
+```{r}
+library('phyloseq')
+library("cowplot")
+library("dplyr")
+library("ggplot2")
+library("vegan")
+library("microbiome")
+library("tibble")
+library("readxl")
+library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(stringr)
+
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer')
+
+load(file = 'KOfam_PHYLUM_ps')
+ps
+meta <- meta(ps)
+```
+
+
+
+
+## 2.1. KEGG phyla composition bar plot
+
+```{r fig.dim = c(10, 5)}
+ps_RA <- transform(ps, "compositional")
+tax <- as.data.frame(tax_table(ps))
+
+# only keep "phyla" and "phyla+geneID" columns
+tax <- tax[, c(6, 10)]
+
+tax_table(ps_RA) <- tax_table(as.matrix(tax))
+
+#ps_RA <- transform(ps, "compositional")
+ps_RA_p <- microbiome::aggregate_rare(ps_RA, level = 'phylum', detection = 1/100, prevalence = 2/140)
+ps_RA_p
+
+
+#create data table
+ps_RA_phyla_df <-  psmelt(ps_RA_p)
+
+#Create color palette
+cbbPalette <- c("#b2b2b2", "#8DD3C7", "#FFED6F", "#CAAEC5", "#F68378", "#8D6942", "#F3B962", "#BCD868", "#6E99BE", "#F0D1E1", "#C191C2", "#FFFFC6", "darkgreen", "#D0D9CD", "#8BC081", "#FF8DB5", "#b71c1c", "deeppink", "#d6849a", "darkolivegreen1")
+
+
+sampletype_names <- list(
+  'forest' = "forest", 'meadow' = "meadow", 'organic' = "organic", 'conventional' = "conventional"
+)
+
+sampletype_labeller <- function(variable,value){
+  return(sampletype_names[value])
+}
+
+
+# check unique values for phylum
+unique(ps_RA_phyla_df$phylum)
+
+
+
+ps_RA_phyla_df$phylum <- as.factor(ps_RA_phyla_df$phylum)
+levels(ps_RA_phyla_df$phylum)
+ps_RA_phyla_df$phylum <- factor(ps_RA_phyla_df$phylum, levels = c("Other", "Acidobacteriota", "Actinomycetota", "Bacillota", "Bacteria", "Candidatus Levyibacteriota", "Candidatus Methylomirabilota", "Candidatus Rokuibacteriota", "Candidatus Sysuimicrobiota", "Chloroflexota", "Gemmatimonadota",  "Myxococcota", "Nitrososphaerota", "Nitrospirota", "Pseudomonadota", "Thermodesulfobacteriota", "Thermomicrobiota", "Verrucomicrobiota"))
+
+levels(ps_RA_phyla_df$phylum)
+
+# Make new depth variable
+ps_RA_phyla_df$Depth <- ps_RA_phyla_df$depth
+
+ps_RA_phyla_df$Depth <- gsub("...", "-", ps_RA_phyla_df$Depth, fixed = TRUE)
+
+ps_RA_phyla_df$Depth[ps_RA_phyla_df$Depth=="40-"] <- "40-80"
+
+
+ps_RA_phyla_df$Depth[ps_RA_phyla_df$Depth=="0-10"] <- "0-10 cm"
+ps_RA_phyla_df$Depth[ps_RA_phyla_df$Depth=="10-20"] <- "10-20 cm"
+ps_RA_phyla_df$Depth[ps_RA_phyla_df$Depth=="20-30"] <- "20-30 cm"
+ps_RA_phyla_df$Depth[ps_RA_phyla_df$Depth=="30-40"] <- "30-40 cm"
+ps_RA_phyla_df$Depth[ps_RA_phyla_df$Depth=="40-80"] <- "40-80 cm"
+
+#Create a plot
+phylumF  <- ggplot(ps_RA_phyla_df, aes(x = Depth ,y = Abundance, fill = phylum)) + geom_bar(stat="identity", position="fill") + scale_fill_manual(values = cbbPalette) + facet_grid (cols = vars(sample_type)) + geom_bar(stat="identity", position="fill") + scale_fill_manual(values = cbbPalette) + theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) + theme_cowplot() +
+  theme(axis.text = element_text(size=14),
+        axis.title = element_text(size=18),
+        legend.text = element_text(size=16),
+        legend.title = element_text(size=18),
+        legend.spacing.y = unit(0, 'cm'),
+        legend.key.size = unit(0.8, 'cm'),
+        title = element_text(size=18))+ theme(axis.text.x = element_text(angle = 45, hjust = 1)) + guides(fill = guide_legend(title="")) + theme(strip.text.x = element_text(size = 22)) +
+  ylab(label = "Relative abundance") + theme(legend.position="right") +  xlab("Soil layer")
+
+phylumF
+```
+
+
+## 2.2. numerical data
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+ps_RA_p <- microbiome::aggregate_rare(ps_RA, level = 'phylum', detection = 0/100, prevalence = 0/140)
+ps_RA_p
+
+
+#create data table
+ps_RA_phyla_df <-  psmelt(ps_RA_p)
+```
+
+
+
+
+```{r}
+ps_RA_phyla_df$percentage <- ps_RA_phyla_df$Abundance * 100
+
+KEGG <- ps_RA_phyla_df %>%
+  group_by(sample_type, depth, phylum) %>%
+  summarize(mean_abund = mean(percentage, na.rm=TRUE)) 
+head(KEGG)
+```
+
+
+
+## 2.3. DIfferential abundance analysis
+
+
+### 2.3.1. With Meadow
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+tax <- as.data.frame(tax_table(ps))
+
+tax <- tax[, c(6, 10)]
+
+tax_table(ps_RA) <- tax_table(as.matrix(tax))
+
+ps_RA_p <- microbiome::aggregate_rare(ps_RA, level = 'phylum', detection = 1/100, prevalence = 2/140)
+ps_RA_p
+
+```
+
+```{r}
+#To remove those from your phyloseq object
+ps_y <- subset_samples(ps_RA_p, sample_type!="forest")
+#This will return a ps object with the samples removed
+ps_y
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_y),
+              MARGIN = ifelse(taxa_are_rows(ps_y), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_y = prune_taxa((prev0 > 0), ps_y)
+ps_y
+
+```
+
+```{r}
+# Run MaAsLin2
+library(Maaslin2)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer\\Gene_PHYLA_MaAsLin2')
+
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+#fit_data <- Maaslin2(
+#  input_data = gene_data,
+#  input_metadata = metadata,
+#  output = "KEGG_TREATMENT_and_LAYER",
+#  fixed_effects = c('Layer', 'Treatment'), # my grouping variable(s)
+#  normalization = "NONE",          # Use CLR for relative abundances
+#  transform = "NONE",             # No extra transform (data is already proportional)
+#  analysis_method = "CPLM", #DEFAULT:
+#  correction = "BH",               # Benjamini-Hochberg FDR correction
+#  plot_heatmap = TRUE,
+#  reference = 'Treatment,Meadow'
+#  )
+```
+
+
+### 2.3.2. WO Meadow
+
+
+```{r}
+#To remove those from your phyloseq object
+ps_y <- subset_samples(ps_RA_p, sample_type!="forest" & sample_type!="meadow")
+#This will return a ps object with the samples removed
+ps_y
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_y),
+              MARGIN = ifelse(taxa_are_rows(ps_y), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_y = prune_taxa((prev0 > 0), ps_y)
+ps_y
+
+```
+
+```{r}
+# Run MaAsLin2
+library(Maaslin2)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer\\Gene_PHYLA_MaAsLin2')
+
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+#fit_data <- Maaslin2(
+#  input_data = gene_data,
+#  input_metadata = metadata,
+#  output = "KEGG_TREATMENT_and_LAYER_WO_MEADOW",
+#  fixed_effects = c('Layer', 'Treatment'), # my grouping variable(s)
+#  normalization = "NONE",          # Use CLR for relative abundances
+#  transform = "NONE",             # No extra transform (data is already proportional)
+#  analysis_method = "CPLM", #DEFAULT:
+#  correction = "BH",               # Benjamini-Hochberg FDR correction
+#  plot_heatmap = TRUE,
+#  reference = 'Treatment,Conventional'
+#  )
+```
+
+
+# 2. CAZyme
+
+rename KEGG data
+
+```{r}
+# lets first save KEGG data with new name
+ps_RA <- transform(ps, "compositional")
+tax <- as.data.frame(tax_table(ps))
+
+tax <- tax[, c(6, 10)]
+
+tax_table(ps_RA) <- tax_table(as.matrix(tax))
+
+ps_RA_p_KEGG <- microbiome::aggregate_rare(ps_RA, level = 'phylum', detection = 0/100, prevalence = 0/140)
+ps_RA_p_KEGG
+
+```
+
+
+Remove forest from the analysis
+
+```{r}
+#To remove those from your phyloseq object
+ps_RA_p_KEGG <- subset_samples(ps_RA_p_KEGG, sample_type!="forest")
+#This will return a ps object with the samples removed
+ps_RA_p_KEGG
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_RA_p_KEGG),
+              MARGIN = ifelse(taxa_are_rows(ps_RA_p_KEGG), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_RA_p_KEGG = prune_taxa((prev0 > 0), ps_RA_p_KEGG)
+ps_RA_p_KEGG
+
+```
+
+
+## 2.1. Load CAZyme data
+
+```{r}
+setwd('C:\\Users\\lehakkin\\RStudio_computer')
+load(file = 'CAZyme_PHYLUM_ps')
+meta <- meta(ps)
+```
+
+
+
+```{r fig.dim = c(10, 5)}
+tax <- as.data.frame(tax_table(ps))
+
+tax <- tax[, -c(1, 2, 7)]
+
+ps_RA <- transform(ps, "compositional")
+tax_table(ps_RA) <- tax_table(as.matrix(tax))
+
+#ps_RA <- transform(ps, "compositional")
+ps_RA_p <- microbiome::aggregate_rare(ps_RA, level = 'phylum', detection = 1/100, prevalence = 2/140)
+ps_RA_p
+
+
+#create data table
+ps_RA_phyla_df <-  psmelt(ps_RA_p)
+
+#Create color palette
+cbbPalette <- c("#b2b2b2", "#8DD3C7", "#FFED6F", "#CAAEC5", "#F68378", "#239FD7", "#8D6942", "#F3B962", "#BCD868", "#6E99BE", "#F0D1E1", "#FE4C48", "#C191C2", "darkolivegreen1","#FFFFC6","darkgreen", "#D0D9CD","#C66542", "#8BC081", "#FF8DB5", "#b71c1c", "deeppink", "#d6849a",  "#8D6942", "#F3B962", "#BCD868", "#6E99BE","#FF8DB5", "#b71c1c", "#EB730F")
+
+
+
+
+sampletype_names <- list(
+  'forest' = "forest", 'meadow' = "meadow", 'organic' = "organic", 'conventional' = "conventional"
+)
+
+sampletype_labeller <- function(variable,value){
+  return(sampletype_names[value])
+}
+
+
+# check unique values for phylum
+unique(ps_RA_phyla_df$phylum)
+
+
+ps_RA_phyla_df$phylum <- as.factor(ps_RA_phyla_df$phylum)
+levels(ps_RA_phyla_df$phylum)
+
+ps_RA_phyla_df$phylum <- factor(ps_RA_phyla_df$phylum, levels = c("Other",  "Acidobacteriota", "Actinomycetota", "Bacillota", "Bacteria", "Bacteroidota","Candidatus Levyibacteriota", "Candidatus Methylomirabilota", "Candidatus Rokuibacteriota", "Candidatus Sysuimicrobiota", "Chloroflexota",  "Cyanobacteriota", "Gemmatimonadota", "Methanobacteriota", "Myxococcota","Nitrososphaerota", "Nitrospirota", "Planctomycetota", "Pseudomonadota", "Thermodesulfobacteriota",  "Thermomicrobiota", "Verrucomicrobiota"))
+
+levels(ps_RA_phyla_df$phylum)
+
+# Make new depth variable
+ps_RA_phyla_df$Depth <- ps_RA_phyla_df$depth
+
+ps_RA_phyla_df$Depth <- gsub("...", "-", ps_RA_phyla_df$Depth, fixed = TRUE)
+
+ps_RA_phyla_df$Depth[ps_RA_phyla_df$Depth=="40-"] <- "40-80"
+
+
+ps_RA_phyla_df$Depth[ps_RA_phyla_df$Depth=="0-10"] <- "0-10 cm"
+ps_RA_phyla_df$Depth[ps_RA_phyla_df$Depth=="10-20"] <- "10-20 cm"
+ps_RA_phyla_df$Depth[ps_RA_phyla_df$Depth=="20-30"] <- "20-30 cm"
+ps_RA_phyla_df$Depth[ps_RA_phyla_df$Depth=="30-40"] <- "30-40 cm"
+ps_RA_phyla_df$Depth[ps_RA_phyla_df$Depth=="40-80"] <- "40-80 cm"
+
+#Create a plot
+phylumCAZYme  <- ggplot(ps_RA_phyla_df, aes(x = Depth ,y = Abundance, fill = phylum)) + geom_bar(stat="identity", position="fill") + scale_fill_manual(values = cbbPalette) + facet_grid (cols = vars(sample_type)) + geom_bar(stat="identity", position="fill") + scale_fill_manual(values = cbbPalette) + theme(panel.border = element_rect(colour = "black", fill=NA, size=0.5)) + theme_cowplot() +
+  theme(axis.text = element_text(size=14),
+        axis.title = element_text(size=18),
+        legend.text = element_text(size=14),
+        legend.title = element_text(size=18),
+        legend.spacing.y = unit(0, 'cm'),
+        legend.key.size = unit(0.7, 'cm'),
+        title = element_text(size=18))+ theme(axis.text.x = element_text(angle = 45, hjust = 1)) + guides(fill = guide_legend(title="", ncol = 1)) + theme(strip.text.x = element_text(size = 22)) +
+  ylab(label = "Relative abundance") + theme(legend.position="right") +  xlab("Soil layer")
+
+phylumCAZYme
+```
+
+## 2.2. numerical data
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+ps_RA_p <- microbiome::aggregate_rare(ps_RA, level = 'phylum', detection = 0/100, prevalence = 0/140)
+ps_RA_p
+
+
+#create data table
+ps_RA_phyla_df <-  psmelt(ps_RA_p)
+```
+
+
+
+
+```{r}
+
+ps_RA_phyla_df$percentage <- ps_RA_phyla_df$Abundance * 100
+
+cazyme <- ps_RA_phyla_df %>%
+  dplyr::group_by(sample_type, depth, phylum) %>%
+  dplyr::summarize(mean_abund = mean(percentage, na.rm=TRUE)) 
+head(cazyme)
+
+
+
+```
+
+
+
+```{r}
+
+ps_RA_phyla_df$percentage <- ps_RA_phyla_df$Abundance * 100
+
+cazyme <- ps_RA_phyla_df %>%
+  dplyr::group_by(sample_type, phylum) %>%
+  dplyr::summarize(mean_abund = mean(percentage, na.rm=TRUE)) 
+head(cazyme)
+
+
+
+```
+
+
+```{r}
+
+ps_RA_phyla_df$percentage <- ps_RA_phyla_df$Abundance * 100
+
+cazyme <- ps_RA_phyla_df %>%
+  dplyr::group_by(phylum) %>%
+  dplyr::summarize(mean_abund = mean(percentage, na.rm=TRUE)) 
+head(cazyme)
+
+
+
+```
+
+## 2.3. cazyme class
+
+
+
+```{r}
+setwd('C:\\Users\\lehakkin\\RStudio_computer')
+load(file = 'CAZyme_FAMILY_PHYLUM_ps_RA')
+meta <- meta(ps_cazyme_phylum)
+```
+
+
+```{r}
+df <- psmelt(ps_cazyme_phylum)
+
+```
+
+
+
+
+```{r}
+summary <- df %>%
+  group_by(phylum, cazyme) %>%
+  summarise(mean = mean(Abundance, na.rm = TRUE), se = (sd(Abundance, na.rm = TRUE)/sqrt(length((Abundance)))))
+head(summary)
+```
+
+Get the phyla with the 5 highest values in a column called mean for every value (character) in column called cazyme
+
+```{r}
+summary_top5_phylum <- summary %>%
+  group_by(cazyme) %>%
+  slice_max(mean, n = 5, with_ties = FALSE) %>%
+  dplyr::select(cazyme, phylum, mean, se) %>%
+  ungroup()
+
+summary_top5_phylum
+```
+
+
+most common CAZymes
+
+```{r}
+tax <- as.data.frame(tax_table(ps_cazyme_phylum))
+tax <- tax[, c(9, 1:8, 10)]
+tax_table(ps_cazyme_phylum) <- tax_table(as.matrix(tax))
+ps_cazyme_phylum_CAZyme_family <- aggregate_rare(ps_cazyme_phylum, level = "cazyme", detection = 0, prevalence = 0)
+
+df_x <- psmelt(ps_cazyme_phylum_CAZyme_family)
+
+x <- df_x %>%
+  group_by(cazyme) %>%
+  summarise(mean = mean(Abundance, na.rm = TRUE), se = (sd(Abundance, na.rm = TRUE)/sqrt(length((Abundance)))))
+x
+
+```
+
+
+## 2.4. Differential abundance analysis
+
+
+
+
+### 2.4.1. With Meadow
+
+
+
+
+
+```{r}
+tax <- as.data.frame(tax_table(ps))
+
+tax <- tax[, -c(1, 2, 7)]
+
+tax_table(ps_RA) <- tax_table(as.matrix(tax))
+
+ps_RA_p <- microbiome::aggregate_rare(ps_RA, level = 'phylum', detection = 1/100, prevalence = 2/140)
+ps_RA_p
+
+```
+
+```{r}
+#To remove those from your phyloseq object
+ps_y <- subset_samples(ps_RA_p, sample_type!="forest")
+#This will return a ps object with the samples removed
+ps_y
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_y),
+              MARGIN = ifelse(taxa_are_rows(ps_y), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_y = prune_taxa((prev0 > 0), ps_y)
+ps_y
+
+```
+
+```{r}
+# Run MaAsLin2
+library(Maaslin2)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer\\Gene_PHYLA_MaAsLin2')
+
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+#fit_data <- Maaslin2(
+#  input_data = gene_data,
+#  input_metadata = metadata,
+#  output = "CAZyme_TREATMENT_and_LAYER",
+#  fixed_effects = c('Layer', 'Treatment'), # my grouping variable(s)
+#  normalization = "NONE",          # Use CLR for relative abundances
+#  transform = "NONE",             # No extra transform (data is already proportional)
+#  analysis_method = "CPLM", #DEFAULT:
+#  correction = "BH",               # Benjamini-Hochberg FDR correction
+#  plot_heatmap = TRUE,
+#  reference = 'Treatment,Meadow'
+#  )
+```
+
+
+# 2. WO Meadow
+
+
+```{r}
+#To remove those from your phyloseq object
+ps_y <- subset_samples(ps_RA_p, sample_type!="forest" & sample_type!="meadow")
+#This will return a ps object with the samples removed
+ps_y
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_y),
+              MARGIN = ifelse(taxa_are_rows(ps_y), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_y = prune_taxa((prev0 > 0), ps_y)
+ps_y
+
+```
+
+```{r}
+# Run MaAsLin2
+library(Maaslin2)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer\\Gene_PHYLA_MaAsLin2')
+
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+#fit_data <- Maaslin2(
+#  input_data = gene_data,
+#  input_metadata = metadata,
+#  output = "CAZyme_TREATMENT_and_LAYER_WO_MEADOW",
+#  fixed_effects = c('Layer', 'Treatment'), # my grouping variable(s)
+#  normalization = "NONE",          # Use CLR for relative abundances
+#  transform = "NONE",             # No extra transform (data is already proportional)
+#  analysis_method = "CPLM", #DEFAULT:
+#  correction = "BH",               # Benjamini-Hochberg FDR correction
+#  plot_heatmap = TRUE,
+#  reference = 'Treatment,Conventional'
+#  )
+```
+
+
+
+
+
+
+
+
+# 3. Compare KEGG and CAZyme
+
+
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+tax <- as.data.frame(tax_table(ps))
+
+tax <- tax[, -c(1, 2, 7)]
+
+tax_table(ps_RA) <- tax_table(as.matrix(tax))
+
+ps_RA_p_CAZyme <- microbiome::aggregate_rare(ps_RA, level = 'phylum', detection = 0/100, prevalence = 0/140)
+ps_RA_p_CAZyme
+
+```
+
+remove forest
+
+```{r}
+#To remove those from your phyloseq object
+ps_RA_p_CAZyme <- subset_samples(ps_RA_p_CAZyme, sample_type!="forest")
+#This will return a ps object with the samples removed
+ps_RA_p_CAZyme
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_RA_p_CAZyme),
+              MARGIN = ifelse(taxa_are_rows(ps_RA_p_CAZyme), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_RA_p_CAZyme = prune_taxa((prev0 > 0), ps_RA_p_CAZyme)
+ps_RA_p_CAZyme
+
+```
+
+## 3.2. combine KEGG and CAZyme data
+
+```{r}
+#create data table
+KEGG_df <-  psmelt(ps_RA_p_KEGG)
+
+colnames(KEGG_df)[colnames(KEGG_df) == 'Abundance'] <- 'KEGG'
+KEGG_df <- KEGG_df[, c(1,2,3)]
+
+
+CAZyme_df <-  psmelt(ps_RA_p_CAZyme)
+colnames(CAZyme_df)[colnames(CAZyme_df) == 'Abundance'] <- 'CAZyme'
+CAZyme_df <- CAZyme_df[, c(1,2,3)]
+
+df <- full_join(KEGG_df, CAZyme_df, by = c("OTU", "Sample"))
+
+# then get the metadata correctly
+df_full <- left_join(df, meta, by = c("Sample"="sampleID"))
+
+# pivot longer
+df_full_long <- df_full %>% pivot_longer(cols=c('KEGG', 'CAZyme'),
+                    names_to='database',
+                    values_to='Abundance') 
+
+# NAs to zeros
+df_full_long <- df_full_long %>% mutate(Abundance = ifelse(is.na(Abundance), 0, Abundance))
+
+# use percentages instead of proportion
+df_full_long$Abundance <- df_full_long$Abundance*100
+```
+
+
+
+
+
+## 3.3. do the comparison
+
+
+with BH p value adjustment
+
+```{r}
+library(dplyr)
+library(car)
+library(tidyr)
+
+# Function to analyze one OTU
+analyze_otu <- function(taxa, data) {
+  # Filter data for current OTU
+  df <- filter(data, OTU == taxa)
+  
+   # Convert database to factor explicitly
+  df$database <- as.factor(df$database)
+  
+  # Levene's test
+  levene_result <- tryCatch(
+    {
+      result <- leveneTest(Abundance ~ database, df)
+      result$`Pr(>F)`[1]
+    },
+    error = function(e) NA_real_
+  )
+  
+  # Kruskal-Wallis test
+  kruskal_result <- tryCatch(
+    {
+      result <- kruskal.test(Abundance ~ database, data = df)
+      result$p.value
+    },
+    error = function(e) NA_real_
+  )
+  
+  # Calculate mean and SE for each database
+  summary_df <- df %>%
+    group_by(database) %>%
+    summarise(
+      mean = mean(Abundance, na.rm = TRUE),
+      se = sd(Abundance, na.rm = TRUE) / sqrt(n())
+    ) %>%
+    mutate(
+      formatted = sprintf("%.3f±%.3f", mean, se)
+    )
+  
+  # Extract values for KEGG and CAZyme
+  kegg_value <- ifelse("KEGG" %in% summary_df$database,
+                      summary_df$formatted[summary_df$database == "KEGG"], 
+                      NA_character_)
+  
+  cazyme_value <- ifelse("CAZyme" %in% summary_df$database,
+                        summary_df$formatted[summary_df$database == "CAZyme"],
+                        NA_character_)
+  
+  # Return as a data frame row
+  data.frame(
+    phylum = taxa,
+    Levenes_p = round(levene_result, 4),
+    Kruskal_p_raw = kruskal_result,  # Keep raw for adjustment
+    Kruskal_p = round(kruskal_result, 4),
+    KEGG = kegg_value,
+    CAZyme = cazyme_value,
+    stringsAsFactors = FALSE
+  )
+}
+
+# Apply function to all OTUs
+all_results <- data.frame()
+
+# Get unique OTUs
+unique_otus <- unique(df_full_long$OTU)
+
+# Loop through each OTU
+all_results <- do.call(rbind, lapply(unique_otus, function(otu) {
+  analyze_otu(otu, df_full_long)
+}))
+
+# ============================================
+# STEP 1: FILTER TO KEEP ONLY SPECIFIED PHYLA
+# ============================================
+keep <- c("Acidobacteriota", "Actinomycetota", "Bacillota", "Bacteria", 
+          "Bacteroidota", "Candidatus Levyibacteriota", "Candidatus Methylomirabilota", 
+          "Candidatus Rokuibacteriota", "Candidatus Sysuimicrobiota", "Chloroflexota", 
+          "Cyanobacteriota", "Gemmatimonadota", "Methanobacteriota", "Myxococcota", 
+          "Nitrososphaerota", "Nitrospirota", "Planctomycetota", "Pseudomonadota", 
+          "Thermodesulfobacteriota", "Thermomicrobiota", "Verrucomicrobiota")
+
+# Filter results
+filtered_results <- subset(all_results, phylum %in% keep)
+
+# ============================================
+# STEP 2: APPLY BH ADJUSTMENT TO FILTERED RESULTS
+# ============================================
+filtered_results <- filtered_results %>%
+  mutate(
+    # BH adjustment (only applied to the filtered phyla)
+    Kruskal_p_BH = p.adjust(Kruskal_p_raw, method = "BH"),
+    # Round the adjusted p-values for display
+    Kruskal_p_BH_rounded = round(Kruskal_p_BH, 4),
+    # Create significance columns
+    significant_raw = ifelse(Kruskal_p_raw < 0.05, "Yes", "No"),
+    significant_BH = ifelse(Kruskal_p_BH < 0.05, "Yes", "No")
+  )
+
+# ============================================
+# STEP 3: VIEW AND SUMMARIZE RESULTS
+# ============================================
+# View results with adjustments
+print(filtered_results %>%
+        dplyr::select(phylum, Kruskal_p, Kruskal_p_BH_rounded, 
+               significant_raw, significant_BH, Levenes_p, KEGG, CAZyme))
+
+
+
+```
+
+
+
+
+```{r}
+rm(list = ls())
+```
+
+

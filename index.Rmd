@@ -1,0 +1,61 @@
+---
+title: "YONI soil profile metagenomic analyses"
+author: "Laura_Hakkinen"
+date: "2026-05-15"
+output: html_document
+---
+
+
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
+
+***
+
+# singleM: analyses of the prokaryotic communities based on raw reads
+
+```{r child = "GIT_Step1_SingleM.Rmd"}
+```
+  
+***
+# contigs-based analysis: KEGG genes
+
+```{r child = "GIT_Step2_KEGG.Rmd"}
+# Calculatind and adding diversities to the phyloseq object
+```
+
+***
+# contigs-based analysis: CAZyme genes
+
+```{r child = "GIT_Step3_CAZymes.Rmd"}
+# Making a phyloseq object with FUNGuild annotations
+```
+
+
+***
+# Mantel correlations
+
+```{r child = "GIT_Step4_Mantel_correlation.Rmd"}
+# Here the first figures, venn-diagrams, are made
+```
+
+***
+
+# Phyla encoding KEGG and CAZyme genes
+
+```{r child = "GIT_Step5_KEGG_and_CAZyme_Taxa.Rmd"}
+# Here the PCoA is done
+```
+
+***
+
+# Structural equation model to predict soil carbon stocks
+
+```{r child = "GIT_Step6_structural_equation_model.Rmd"}
+# Here I will do PERMANOVA
+```
+
+***
+
+
+

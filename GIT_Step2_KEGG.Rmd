@@ -1,0 +1,3921 @@
+---
+title: "Untitled"
+author: "Laura_Hakkinen"
+date: "2026-16-05"
+output: html_document
+---
+
+
+
+
+# Contigs-based analysis of KEGG genes
+
+
+# 1. Load KEGG data
+
+
+```{r}
+library('phyloseq')
+library("cowplot")
+library("dplyr")
+library("ggplot2")
+library("vegan")
+library("microbiome")
+library("tibble")
+library("readxl")
+library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(stringr)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer')
+
+# load the coverage data
+load(file = 'KOfam_metabolism_ps_COVERAGE_FINAL_PNSCO2')
+ps
+
+meta <- meta(ps)
+
+ps_RA <- transform(ps, "compositional")
+```
+
+
+
+
+
+
+# 2. PCoA for KEGG composition
+
+
+
+To visualize beta diversity, I will do a PCoA which is metric instead of e.g. non-metric NMDS
+
+I will be following somewhat this tutorial:
+
+[Joey Bernhardt](https://github.com/JoeyBernhardt/NumericalEcology/blob/master/Num._Ecology_Chap._9.md)
+
+
+
+
+```{r}
+OTU = as(otu_table(ps_RA), "matrix")
+# transpose if necessary
+if(taxa_are_rows(ps_RA)){OTU <- t(OTU)}
+# Coerce to data.frame
+OTU = as.data.frame(OTU)
+OTU <- as.matrix(OTU)
+
+bray_dist <- vegan::vegdist(OTU, method="bray")
+str(bray_dist)
+
+# use k = 3 so we'll get calculations for three axes
+pcoa <- cmdscale(bray_dist, eig=TRUE, k = 3)
+ordiplot(scores(pcoa),display="sites", type="points")
+```
+
+
+Let's first make PCoA ordination with axes 1 and 2, and later for 1 and 3.
+
+Env. variables
+
+```{r}
+# Post-Hoc Projections of environmental variables
+# envfit in vegan projects points onto vectors that have maximum correlation with corresponding environmental variables
+pcoa.env12 <- envfit(pcoa, meta[ ,c("pH_H2O", "EC_uScm", "C_g_per_kg", "N_gkg", "TP_gkg", "sample_type", "depth_numerical", "DOC_mgkg", "Pinorg_mgkg", "Porg_mgkg", "log_root", "C_per_N", "Feox_mmolkg", "Alox_mmolkg", "oxides_mmolkg", "PH2O_mgkg")], na.rm = TRUE, choices=c(1:2), permutations = 999)
+
+    
+
+# main effects
+pcoa.env12
+
+ef12.adj <- pcoa.env12
+pvals.adj <- p.adjust (pcoa.env12$vectors$pvals, method = 'bonferroni')
+ef12.adj$vectors$pvals <- pvals.adj
+ef12.adj
+
+```
+
+
+To plot (classical) mds (which is equivalent to PCoA) with ggplot a new datasheet needs to be created which contains the x,y points for each site. You can do this by calling the scores of you mds.
+
+
+
+
+```{r}
+site.scrs <- as.data.frame(scores(pcoa, display = "sites")) #save pcoa results into dataframe
+site.scrs <- cbind(site.scrs, soil_type = meta$sample_type) #add grouping variable "soil_type" to dataframe
+site.scrs <- cbind(site.scrs, depth = meta$depth) #add grouping variable of depth
+
+head(site.scrs)
+```
+
+
+Categorial and continuous variables
+
+```{r}
+
+# first categorial variables
+env.scores_cat12 <- as.data.frame(scores(pcoa.env12, display = "factors"))*0.25 # multiply the envfit scores to keep them in the frame of the ordination
+env.scores_cat12 <- cbind(env.scores_cat12, env.variables = rownames(env.scores_cat12)) #and then gives them their names
+
+env.scores_cat12 <- cbind(env.scores_cat12, pval = pcoa.env12$factors$pvals) # add pvalues to dataframe
+sig.env.scores_cat12 <- subset(env.scores_cat12, pval<=0.05) #subset data to show variables significant at 0.05
+sig.env.scores_cat12
+# all were significant
+
+
+# then continous variables
+env.scores_cont12 <- as.data.frame(scores(pcoa.env12, display = "vectors"))*0.25 # multiply the envfit scores to keep them in the frame of the ordination
+env.scores_cont12 <- cbind(env.scores_cont12, env.variables = rownames(env.scores_cont12)) #and then gives them their names
+
+env.scores_cont12 <- cbind(env.scores_cont12, pval = pcoa.env12$vectors$pvals) # add pvalues to dataframe
+sig.env.scores_cont12 <- subset(env.scores_cont12, pval<=0.05) #subset data to show variables significant at 0.05
+sig.env.scores_cont12
+# all were significant
+```
+
+
+
+Now we have the relevant information for plotting the ordination in ggplot
+
+
+```{r}
+MyPalette <- c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c")
+
+site.scrs$new_depth <- site.scrs$depth
+
+site.scrs$new_depth <- gsub("...", "-", site.scrs$new_depth, fixed = TRUE)
+
+site.scrs$new_depth[site.scrs$new_depth=="40-"] <- "40-80"
+
+site.scrs$new_depth[site.scrs$new_depth=="0-10"] <- "0-10 cm"
+site.scrs$new_depth[site.scrs$new_depth=="10-20"] <- "10-20 cm"
+site.scrs$new_depth[site.scrs$new_depth=="20-30"] <- "20-30 cm"
+site.scrs$new_depth[site.scrs$new_depth=="30-40"] <- "30-40 cm"
+site.scrs$new_depth[site.scrs$new_depth=="40-80"] <- "40-80 cm"
+```
+
+
+Get axis %
+
+```{r}
+#First lets run the PCoA with phyloseq to get the axis percentages (plot_ordination gives axis percentages)
+
+GP.ord <- ordinate(ps_RA, "PCoA", "bray")
+p2 = plot_ordination(ps_RA, GP.ord, type="samples", color="sample_type", shape="depth")
+p2
+```
+
+Remember to change the axis percentages accordingly below!!!
+
+## 2.1. Plot the PCoA
+
+
+```{r}
+pcoa.plot <- ggplot() + geom_point(data=site.scrs, aes(Dim1, Dim2, colour = factor(site.scrs$soil_type), shape = factor(site.scrs$new_depth)), size = 6, alpha = 0.6, stroke = 1.5) + theme_cowplot() + theme(panel.background = element_rect(fill = NA, colour = "black", size = 1, linetype = "solid")) + labs(colour = "", shape = "") + theme(legend.text = element_text(size = 12), axis.text = element_text(size = 16)) + scale_colour_manual(values = MyPalette) + labs(y = "PCoA2 (22.2%)", x = "PCoA1 (32.1%)")
+
+
+pcoa.plot
+
+```
+Add env. variables to the PCoA
+
+First, simplify the names
+
+
+
+```{r}
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "pH_H2O"] <- "pH"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "C_g_per_kg"] <- "C"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "N_gkg"] <- "N"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "TP_gkg"] <- "P-tot"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "depth_numerical"] <- "Depth"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "DOC_mgkg"] <- "DOC"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "Porg_mgkg"] <- "P-org"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "log_root"] <- "log root"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "C_per_N"] <- "C/N"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "Feox_mmolkg"] <- "Fe-ox"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "Alox_mmolkg"] <- "Al-ox"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "depth"] <- "Depth"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "log root"] <- "Root biomass"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "S_mg_per_kg"] <- "S"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "Mn_mg_per_kg"] <- "Mn"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "PH2O_mgkg"] <- "P-H2O"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "POM_C_percent"] <- "POM-C"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "MAOM_C_percent"] <- "MAOM-C"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "oxides_mmolkg"] <- "Oxides"
+sig.env.scores_cont12$env.variables[sig.env.scores_cont12$env.variables == "EC_uScm"] <- "EC"
+```
+
+...then plot
+
+```{r}
+p1 <- pcoa.plot +
+  geom_segment(aes(x = 0, y = 0, xend = Dim1, yend = Dim2), 
+               data = sig.env.scores_cont12, 
+               size = 1,  # Increased from 1 to 2
+               alpha = 0.3, 
+               colour = "grey30") + 
+  ggrepel::geom_text_repel(data = sig.env.scores_cont12, 
+                           aes(x = Dim1, y = Dim2), 
+                           colour = "blue", 
+                           fontface = "bold", 
+                           label = sig.env.scores_cont12$env.variables, 
+                           segment.size = 0.15, 
+                           box.padding = unit(0.15, "lines"), 
+                           point.padding = (0.15), 
+                           force = 1, 
+                           max.time = 1000, 
+                           nudge_y = 0.00, 
+                           nudge_x = 0.00)
+
+p1
+```
+
+
+
+
+
+# 3. PERMANOVA of KEGG genes
+
+
+
+
+Calculate Bray-Curtis (dis)similarities
+
+```{r}
+ps_RA_bray <- phyloseq::distance(ps_RA, method = "bray")
+```
+
+
+Homogenity of variances
+
+Check that variance homogeneity assumptions hold (to ensure the reliability of the results). If  groups have signif. different spreads the permanova result may be potentially explained by that, rtaher than the groups.
+
+Betadisper first calculates the average distance of group members to the group centroid in multivariate space (generated by a distance matrix). Then, an ANOVA is done to test if the dispersions (variances) of groups are different.
+
+for management type
+
+```{r}
+anova(betadisper(ps_RA_bray, meta$sample_type))
+```
+         
+
+We see that the ANOVA p-value is NOT significant meaning that the **homogeneity of variance assumption is met**
+
+
+for depth
+
+```{r}
+anova(betadisper(ps_RA_bray, meta$depth))
+```
+
+We see that the ANOVA p-value is significant meaning that **homogeneity of variance assumption is NOT met**
+
+
+post hoc
+
+I'll do post hoc analysis with Tukey's test to see which groups differ in relation to their variances
+
+```{r}
+TukeyHSD(betadisper(ps_RA_bray, meta$depth))
+```
+
+Only the soil layer 40-80 cm differs from 30-40 cm
+
+
+## 3.1. Initial PERMANOVAs
+
+
+With forest
+
+First, I will do PERMANOVA so that I include all management types (later without forest)
+
+
+```{r}
+# first with just soil type and strata option
+adonis2(formula = ps_RA_bray~ sample_type, data = meta, permutations = 999, method = "bray", by = "margin", strata = meta$depth)
+```
+
+Significant
+
+Without forest
+
+```{r}
+# subset samples
+ps_x <- subset_samples(ps_RA, sample_type != "forest")
+meta_subset <- meta(ps_x)
+
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_x),
+              MARGIN = ifelse(taxa_are_rows(ps_x), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_x = prune_taxa((prev0 > 0), ps_x)
+ps_x
+
+b <- phyloseq::distance(ps_x, method = "bray")
+
+
+set.seed(777)
+
+final <- adonis2(formula = b ~ sample_type, data = meta_subset, permutations = 9999, method = "bray", by = "margin", strata = meta_subset$depth)
+final
+
+```
+
+
+Significant
+
+
+
+Depth
+
+```{r}
+# then with just depth and strata option
+adonis2(formula = ps_RA_bray~ depth, data = meta, permutations = 9999, method = "bray", by = "margin", strata = meta$sample_type)
+```
+
+Depth has a larger effect. So, let's put it first in the model
+
+
+## 3.2. Final PERMANOVA
+
+For the full model it matters which "by" option we choose. When by="terms" significance for each term is calculated sequentially from first to last, so that the order of terms matter. We will use this, because with sequential analysis we will get R2 values that sum up to 1, and will also get the significance and R2 values for each interaction term separately rather than for the interaction alone.
+
+Note! Setting by = "terms" will assess significance for each term (sequentially from first to last), by = "margin" will assess the marginal effects of the terms (each marginal term analysed in a model with all other variables)
+
+
+
+
+```{r}
+set.seed(270285)
+final <- adonis2(formula = ps_RA_bray ~ depth * sample_type, data = meta, permutations = 9999, method = "bray", by = "terms")
+final
+
+```
+
+
+
+
+## 3.3. Add PERMANOVA results to PCoA
+
+```{r}
+library(ggpubr) ## for getting stat_regline_equation
+library("ggpmisc")
+
+KEGG_PCoA <- p1 + 
+  annotate(
+    geom = "text",
+    x = -0.20,
+    y = 0.35,
+    label = "PERMANOVA \nSoil layer:Treatment: R²=0.09; p=0.044 \nSoil layer: R²=0.27; p<0.001 \nTreatment: R²=0.06; p<0.001 \nModel R²=0.42",
+    hjust = 0,
+    size = 4  # Increase this value until text matches your desired size (default is 3.88)
+  )
+
+KEGG_PCoA
+
+
+```
+
+
+
+
+
+# 4. Heatmaps of KEGG
+
+## 4.1. CO2 fixation
+
+### 4.1.1. pathway
+
+
+
+I will do heatmap for RA values.
+
+For the final heatmap figure the RA values will be standardizes (z-transformed)
+
+Note! I will not do Z-transforming the data before plotting the heatmap. Instead I will do row scaling in the Pheatmap stage, which means that each gene's relative abundance is standardized
+
+
+
+Subset the CO2-fixing
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+ps_co2fix <- subset_taxa(ps_RA, metabolism == "CO2_fixing")
+ps_co2fix
+
+ps_co2fix <- aggregate_rare(ps_co2fix, level = 'pathway', detection = 0/100, prevalence = 0/140)
+ps_co2fix
+
+```
+
+
+
+```{r}
+meta <- meta(ps_co2fix)
+
+meta$Depth <- gsub("...", "-", meta$depth, fixed = TRUE)
+
+meta$Depth[meta$Depth=="40-"] <- "40-80"
+
+
+meta$Depth[meta$Depth=="0-10"] <- "0-10 cm"
+meta$Depth[meta$Depth=="10-20"] <- "10-20 cm"
+meta$Depth[meta$Depth=="20-30"] <- "20-30 cm"
+meta$Depth[meta$Depth=="30-40"] <- "30-40 cm"
+meta$Depth[meta$Depth=="40-80"] <- "40-80 cm"
+
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+
+# Z-transform
+#ps_co2fix_z <- microbiome::transform(ps_co2fix, 'Z', log10 = FALSE)
+ps_co2fix_z <- ps_co2fix
+
+data_subset <- as(otu_table(ps_co2fix_z), "matrix")
+data_subset <- as.matrix(data_subset)
+
+# add annotations "Depth" and "Treatment"
+my_sample_col <- data.frame(meta[c("Depth", "sample_type")], row.names = row.names(meta))
+colnames(my_sample_col) <- c("Depth", "Treatment")
+
+
+x <- as.data.frame(t(data_subset))
+y <- as.data.frame(my_sample_col)
+colnames(y) <- c("Depth", "sample_type")
+z <- dplyr::left_join(rownames_to_column(x), rownames_to_column(y), by=c("rowname" = "rowname"))
+colnames(z)[1] <- "ID"
+
+# make into mean per treatment and soil layer
+f <- z %>%
+  group_by(sample_type, Depth) %>%
+  summarise_all(mean)
+
+# remove ID column
+f <- f[ , -3]
+
+# make new ID column, which is the soiltypedepth
+library(stringr)
+f$ID <- str_c(f$sample_type, '_', f$Depth)
+
+# make new df with just sample type, depth and sampletypedepth
+df <- f[c("sample_type", "Depth", "ID")]
+# remove extra columns from f
+f2 <- f[, -c(1, 2, 7)]
+# column into rownames
+rownames(f2) <- f$ID
+# make into numeric matrix
+f3 <- data.matrix(f2, rownames.force = NA)
+f4 <- t(f3)
+
+# same for df
+# remove extra columns from df
+df2 <- df[ , -c(3)]
+# column into rownames
+rownames(df2) <- df$ID
+my_sample_col2 <- df2
+my_sample_col3 <- as.data.frame(my_sample_col2)
+rownames(my_sample_col3) <- df$ID
+# lets add annotations of samples
+
+# add annotations "Depth" and "soil_type" and change order
+colnames(my_sample_col3) <- c("Treatment", "Depth")
+my_sample_col3 <- my_sample_col3[, c(2,1)]
+
+```
+
+
+
+
+
+```{r}
+# 1. Prepare group data
+group <- as.data.frame(tax_table(ps))
+group <- subset(group, metabolism=="CO2_fixing")
+group <- group[!duplicated(group[c('pathway')]), ]
+rownames(group) <- group$pathway  # Ensure pathway names are row names
+group <- group[match(rownames(f4), rownames(group)), ]  # Match order with f4
+
+# Clean pathway names (no annotation needed)
+group$pathway <- factor(group$pathway)  # Ensure it's a factor
+
+# Order f4 rows by pathway (no gaps needed if no annotation)
+f4_ordered <- f4[order(group$pathway), ]
+
+row_gaps <- cumsum(table(group$pathway))[-length(table(group$pathway))]
+
+
+
+#Create color palette
+my_colour = list(
+  "Treatment" = c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c"),
+  Depth = c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A"))
+
+# add gap between sample_types
+gp_col = which(diff(as.numeric(factor(my_sample_col3$Treatment)))!=0)
+```
+
+
+```{r}
+row.names(f4_ordered)
+```
+
+
+```{r}
+# Change pathway names and remove unwanted
+
+## these will be removed: C4_Dicarboxylic_acid_cycle
+# row of data frame
+
+
+row.names(f4_ordered)[1] <- "Arnon-Buchanan cycle"  
+row.names(f4_ordered)[2] <- "Calvin cycle"
+row.names(f4_ordered)[3] <- "Hydroxypropionate bicycle"  
+row.names(f4_ordered)[4] <- "Wood-Ljungdahl pathway" 
+```
+
+
+
+
+```{r}
+library("ggplotify")
+library("pheatmap")
+p2 <- as.ggplot(function() pheatmap(f4_ordered, cluster_cols = FALSE, cluster_rows = TRUE, annotation_col = my_sample_col3, annotation_colors = my_colour, gaps_col = gp_col, color=colorRampPalette(c("navy", "white", "red"))(50), show_colnames = FALSE, legend = TRUE, border_color = NA, cellheight = 16, fontsize = 14, fontsize_row = 14, annotation_names_row = FALSE, gaps_row = row_gaps, annotation_names_col = FALSE, scale = "row"))
+
+p2
+```
+
+
+
+### 4.2.2. gene
+
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+ps_co2fix <- subset_taxa(ps_RA, metabolism == "CO2_fixing")
+ps_co2fix
+
+ps_co2fix <- aggregate_rare(ps_co2fix, level = 'gene', detection = 0/100, prevalence = 0/140)
+ps_co2fix
+
+```
+
+
+
+
+```{r}
+meta <- meta(ps_co2fix)
+
+meta$Depth <- gsub("...", "-", meta$depth, fixed = TRUE)
+
+meta$Depth[meta$Depth=="40-"] <- "40-80"
+
+
+meta$Depth[meta$Depth=="0-10"] <- "0-10 cm"
+meta$Depth[meta$Depth=="10-20"] <- "10-20 cm"
+meta$Depth[meta$Depth=="20-30"] <- "20-30 cm"
+meta$Depth[meta$Depth=="30-40"] <- "30-40 cm"
+meta$Depth[meta$Depth=="40-80"] <- "40-80 cm"
+
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+
+# Z-transform
+#ps_co2fix_z <- microbiome::transform(ps_co2fix, 'Z', log10 = FALSE)
+ps_co2fix_z <- ps_co2fix
+
+data_subset <- as(otu_table(ps_co2fix_z), "matrix")
+data_subset <- as.matrix(data_subset)
+
+# add annotations "Depth" and "Treatment"
+my_sample_col <- data.frame(meta[c("Depth", "sample_type")], row.names = row.names(meta))
+colnames(my_sample_col) <- c("Depth", "Treatment")
+
+
+x <- as.data.frame(t(data_subset))
+y <- as.data.frame(my_sample_col)
+colnames(y) <- c("Depth", "sample_type")
+z <- dplyr::left_join(rownames_to_column(x), rownames_to_column(y), by=c("rowname" = "rowname"))
+colnames(z)[1] <- "ID"
+
+# make into mean per treatment and soil layer
+f <- z %>%
+  group_by(sample_type, Depth) %>%
+  summarise_all(mean)
+
+# remove ID column
+f <- f[ , -3]
+
+# make new ID column, which is the soiltypedepth
+library(stringr)
+f$ID <- str_c(f$sample_type, '_', f$Depth)
+
+# make new df with just sample type, depth and sampletypedepth
+df <- f[c("sample_type", "Depth", "ID")]
+# remove extra columns from f
+f2 <- f[, -c(1, 2, 13)]
+# column into rownames
+rownames(f2) <- f$ID
+# make into numeric matrix
+f3 <- data.matrix(f2, rownames.force = NA)
+f4 <- t(f3)
+
+# same for df
+# remove extra columns from df
+df2 <- df[ , -c(3)]
+# column into rownames
+rownames(df2) <- df$ID
+my_sample_col2 <- df2
+my_sample_col3 <- as.data.frame(my_sample_col2)
+rownames(my_sample_col3) <- df$ID
+# lets add annotations of samples
+
+# add annotations "Depth" and "soil_type" and change order
+colnames(my_sample_col3) <- c("Treatment", "Depth")
+my_sample_col3 <- my_sample_col3[, c(2,1)]
+
+```
+
+
+
+```{r}
+# 1. Prepare group data
+group <- as.data.frame(tax_table(ps))
+group <- subset(group, metabolism=="CO2_fixing")
+# remove duplicate genes
+group <- group[!duplicated(group[c('gene')]), ]
+
+group$gene[group$metabolism == "CO2_fixing" & !is.na(group$metabolism)]
+rownames(group) <- group$gene  # Ensure gene names are row names
+group <- group[match(rownames(f4), rownames(group)), ]  # Match order with f4
+
+# Clean pathway names (no annotation needed)
+group$pathway <- factor(group$pathway)  # Ensure it's a factor
+
+# Order f4 rows by pathway (no gaps needed if no annotation)
+f4_ordered <- f4[order(group$pathway), ]
+
+row_gaps <- cumsum(table(group$pathway))[-length(table(group$pathway))]
+
+
+
+#Create color palette
+my_colour = list(
+  "Treatment" = c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c"),
+  Depth = c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A"))
+
+# add gap between sample_types
+gp_col = which(diff(as.numeric(factor(my_sample_col3$Treatment)))!=0)
+```
+
+
+
+```{r}
+library("ggplotify")
+library("pheatmap")
+p2 <- as.ggplot(function() pheatmap(f4_ordered, cluster_cols = FALSE, cluster_rows = FALSE, annotation_col = my_sample_col3, annotation_colors = my_colour, gaps_col = gp_col, color=colorRampPalette(c("navy", "white", "red"))(50), show_colnames = FALSE, legend = TRUE, border_color = NA, cellheight = 16, fontsize = 14, fontsize_row = 14, annotation_names_row = FALSE, gaps_row = row_gaps, annotation_names_col = FALSE, scale = "row"))
+
+p2
+```
+
+
+## 4.2. P-cycling
+
+
+### 4.2.1. pathway
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+ps_x <- subset_taxa(ps_RA, metabolism=="P_cycling")
+ps_x
+
+x <- as.data.frame(tax_table(ps_x))
+x <- x[, c(6, 1:5)]
+
+tax_table(ps_x) <- tax_table(as.matrix(x))
+
+ps_p <- aggregate_rare(ps_x, level = 'pathway', detection = 0/100, prevalence = 0/140)
+ps_p
+```
+
+
+```{r}
+meta <- meta(ps_p)
+
+meta$Depth <- gsub("...", "-", meta$depth, fixed = TRUE)
+
+meta$Depth[meta$Depth=="40-"] <- "40-80"
+
+
+meta$Depth[meta$Depth=="0-10"] <- "0-10 cm"
+meta$Depth[meta$Depth=="10-20"] <- "10-20 cm"
+meta$Depth[meta$Depth=="20-30"] <- "20-30 cm"
+meta$Depth[meta$Depth=="30-40"] <- "30-40 cm"
+meta$Depth[meta$Depth=="40-80"] <- "40-80 cm"
+
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+
+# Z-transform
+#ps_p_z <- microbiome::transform(ps_p, 'Z', log10 = FALSE)
+ps_p_z <- ps_p
+
+data_subset <- as(otu_table(ps_p_z), "matrix")
+data_subset <- as.matrix(data_subset)
+
+# add annotations "Depth" and "Treatment"
+my_sample_col <- data.frame(meta[c("Depth", "sample_type")], row.names = row.names(meta))
+colnames(my_sample_col) <- c("Depth", "Treatment")
+
+
+x <- as.data.frame(t(data_subset))
+y <- as.data.frame(my_sample_col)
+colnames(y) <- c("Depth", "sample_type")
+z <- dplyr::left_join(rownames_to_column(x), rownames_to_column(y), by=c("rowname" = "rowname"))
+colnames(z)[1] <- "ID"
+
+# make into mean per treatment and soil layer
+f <- z %>%
+  group_by(sample_type, Depth) %>%
+  summarise_all(mean)
+
+# remove ID column
+f <- f[ , -3]
+
+# make new ID column, which is the soiltypedepth
+library(stringr)
+f$ID <- str_c(f$sample_type, '_', f$Depth)
+
+# make new df with just sample type, depth and sampletypedepth
+df <- f[c("sample_type", "Depth", "ID")]
+# remove extra columns from f
+f2 <- f[, -c(1, 2, 6)]
+# column into rownames
+rownames(f2) <- f$ID
+# make into numeric matrix
+f3 <- data.matrix(f2, rownames.force = NA)
+f4 <- t(f3)
+
+# same for df
+# remove extra columns from df
+df2 <- df[ , -c(3)]
+# column into rownames
+rownames(df2) <- df$ID
+my_sample_col2 <- df2
+my_sample_col3 <- as.data.frame(my_sample_col2)
+rownames(my_sample_col3) <- df$ID
+# lets add annotations of samples
+
+# add annotations "Depth" and "soil_type" and change order
+colnames(my_sample_col3) <- c("Treatment", "Depth")
+my_sample_col3 <- my_sample_col3[, c(2,1)]
+
+```
+
+
+
+```{r}
+# 1. Prepare group data
+group <- as.data.frame(tax_table(ps_p))
+#group <- subset(group, metabolism == "P_cycling")
+#rownames(group) <- group$gene  # Ensure gene names are row names
+#group <- group[match(rownames(f4), rownames(group)), ]  # Match order with f4
+
+# Clean pathway names (no annotation needed)
+group$pathway <- factor(group$pathway)  # Ensure it's a factor
+
+# Order f4 rows by pathway (no gaps needed if no annotation)
+f4_ordered <- f4[order(group$pathway), ]
+
+row_gaps <- cumsum(table(group$pathway))[-length(table(group$pathway))]
+
+
+
+#Create color palette
+my_colour = list(
+  "Treatment" = c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c"),
+  Depth = c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A"))
+
+# add gap between sample_types
+gp_col = which(diff(as.numeric(factor(my_sample_col3$Treatment)))!=0)
+```
+
+
+```{r}
+row.names(f4_ordered)
+```
+
+
+
+```{r}
+row.names(f4_ordered)[1] <- "P starvation"  
+row.names(f4_ordered)[2] <- "P-inorganic solubilization"
+row.names(f4_ordered)[3] <- "P-organic mineralization"  
+```
+
+
+
+
+```{r}
+p2 <- as.ggplot(function() pheatmap(f4_ordered, cluster_cols = FALSE, cluster_rows = FALSE, annotation_col = my_sample_col3, annotation_colors = my_colour, gaps_col = gp_col, color=colorRampPalette(c("navy", "white", "red"))(50), show_colnames = FALSE, legend = TRUE, border_color = NA, cellheight = 16, fontsize = 14, fontsize_row = 14, annotation_names_row = FALSE, annotation_names_col = FALSE, scale = "row"))
+#, gaps_row = row_gaps
+p2
+```
+
+### 4.2.2. gene
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+ps_p <- subset_taxa(ps_RA, metabolism=="P_cycling")
+ps_p
+
+ps_p <- aggregate_rare(ps_p, level = 'gene', detection = 0/100, prevalence = 0/140)
+ps_p
+```
+
+
+```{r}
+meta <- meta(ps_p)
+
+meta$Depth <- gsub("...", "-", meta$depth, fixed = TRUE)
+
+meta$Depth[meta$Depth=="40-"] <- "40-80"
+
+
+meta$Depth[meta$Depth=="0-10"] <- "0-10 cm"
+meta$Depth[meta$Depth=="10-20"] <- "10-20 cm"
+meta$Depth[meta$Depth=="20-30"] <- "20-30 cm"
+meta$Depth[meta$Depth=="30-40"] <- "30-40 cm"
+meta$Depth[meta$Depth=="40-80"] <- "40-80 cm"
+
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+
+# Z-transform
+#ps_p_z <- microbiome::transform(ps_p, 'Z', log10 = FALSE)
+ps_p_z <- ps_p
+
+data_subset <- as(otu_table(ps_p_z), "matrix")
+data_subset <- as.matrix(data_subset)
+
+# add annotations "Depth" and "Treatment"
+my_sample_col <- data.frame(meta[c("Depth", "sample_type")], row.names = row.names(meta))
+colnames(my_sample_col) <- c("Depth", "Treatment")
+
+
+x <- as.data.frame(t(data_subset))
+y <- as.data.frame(my_sample_col)
+colnames(y) <- c("Depth", "sample_type")
+z <- dplyr::left_join(rownames_to_column(x), rownames_to_column(y), by=c("rowname" = "rowname"))
+colnames(z)[1] <- "ID"
+
+# make into mean per treatment and soil layer
+f <- z %>%
+  group_by(sample_type, Depth) %>%
+  summarise_all(mean)
+
+# remove ID column
+f <- f[ , -3]
+
+# make new ID column, which is the soiltypedepth
+library(stringr)
+f$ID <- str_c(f$sample_type, '_', f$Depth)
+
+# make new df with just sample type, depth and sampletypedepth
+df <- f[c("sample_type", "Depth", "ID")]
+# remove extra columns from f
+f2 <- f[, -c(1, 2, 24)]
+# column into rownames
+rownames(f2) <- f$ID
+# make into numeric matrix
+f3 <- data.matrix(f2, rownames.force = NA)
+f4 <- t(f3)
+
+# same for df
+# remove extra columns from df
+df2 <- df[ , -c(3)]
+# column into rownames
+rownames(df2) <- df$ID
+my_sample_col2 <- df2
+my_sample_col3 <- as.data.frame(my_sample_col2)
+rownames(my_sample_col3) <- df$ID
+# lets add annotations of samples
+
+# add annotations "Depth" and "soil_type" and change order
+colnames(my_sample_col3) <- c("Treatment", "Depth")
+my_sample_col3 <- my_sample_col3[, c(2,1)]
+
+```
+
+
+
+```{r}
+# 1. Prepare group data
+
+group <- as.data.frame(tax_table(ps_RA))
+group <- subset(group, metabolism == "P_cycling")
+rownames(group) <- group$gene  # Ensure gene names are row names
+group <- group[match(rownames(f4), rownames(group)), ]  # Match order with f4
+
+# Clean pathway names (no annotation needed)
+group$pathway <- factor(group$pathway)  # Ensure it's a factor
+
+# Order f4 rows by pathway (no gaps needed if no annotation)
+f4_ordered <- f4[order(group$pathway), ]
+
+row_gaps <- cumsum(table(group$pathway))[-length(table(group$pathway))]
+
+
+
+#Create color palette
+my_colour = list(
+  "Treatment" = c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c"),
+  Depth = c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A"))
+
+# add gap between sample_types
+gp_col = which(diff(as.numeric(factor(my_sample_col3$Treatment)))!=0)
+```
+
+
+
+
+
+```{r}
+p2 <- as.ggplot(function() pheatmap(f4_ordered, cluster_cols = FALSE, cluster_rows = FALSE, annotation_col = my_sample_col3, annotation_colors = my_colour, gaps_col = gp_col, color=colorRampPalette(c("navy", "white", "red"))(50), show_colnames = FALSE, legend = TRUE, border_color = NA, cellheight = 16, fontsize = 14, fontsize_row = 14, annotation_names_row = FALSE, gaps_row = row_gaps, annotation_names_col = FALSE, scale = "row"))
+
+p2
+```
+
+
+
+
+## 4.3. N-cycling
+
+
+
+### 4.3.1. pathway
+
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+ps_x <- subset_taxa(ps_RA, metabolism=="N_cycling")
+ps_x
+
+x <- as.data.frame(tax_table(ps_x))
+x <- x[, c(6, 1:5)]
+
+tax_table(ps_x) <- tax_table(as.matrix(x))
+
+ps_p <- aggregate_rare(ps_x, level = 'pathway', detection = 0/100, prevalence = 0/140)
+ps_p
+```
+
+
+```{r}
+meta <- meta(ps_p)
+
+meta$Depth <- gsub("...", "-", meta$depth, fixed = TRUE)
+
+meta$Depth[meta$Depth=="40-"] <- "40-80"
+
+
+meta$Depth[meta$Depth=="0-10"] <- "0-10 cm"
+meta$Depth[meta$Depth=="10-20"] <- "10-20 cm"
+meta$Depth[meta$Depth=="20-30"] <- "20-30 cm"
+meta$Depth[meta$Depth=="30-40"] <- "30-40 cm"
+meta$Depth[meta$Depth=="40-80"] <- "40-80 cm"
+
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+
+# Z-transform
+#ps_p_z <- microbiome::transform(ps_p, 'Z', log10 = FALSE)
+ps_p_z <- ps_p
+
+data_subset <- as(otu_table(ps_p_z), "matrix")
+data_subset <- as.matrix(data_subset)
+
+# add annotations "Depth" and "Treatment"
+my_sample_col <- data.frame(meta[c("Depth", "sample_type")], row.names = row.names(meta))
+colnames(my_sample_col) <- c("Depth", "Treatment")
+
+
+x <- as.data.frame(t(data_subset))
+y <- as.data.frame(my_sample_col)
+colnames(y) <- c("Depth", "sample_type")
+z <- dplyr::left_join(rownames_to_column(x), rownames_to_column(y), by=c("rowname" = "rowname"))
+colnames(z)[1] <- "ID"
+
+# make into mean per treatment and soil layer
+f <- z %>%
+  group_by(sample_type, Depth) %>%
+  summarise_all(mean)
+
+# remove ID column
+f <- f[ , -3]
+
+# make new ID column, which is the soiltypedepth
+library(stringr)
+f$ID <- str_c(f$sample_type, '_', f$Depth)
+
+# make new df with just sample type, depth and sampletypedepth
+df <- f[c("sample_type", "Depth", "ID")]
+# remove extra columns from f
+f2 <- f[, -c(1, 2, 9)]
+# column into rownames
+rownames(f2) <- f$ID
+# make into numeric matrix
+f3 <- data.matrix(f2, rownames.force = NA)
+f4 <- t(f3)
+
+# same for df
+# remove extra columns from df
+df2 <- df[ , -c(3)]
+# column into rownames
+rownames(df2) <- df$ID
+my_sample_col2 <- df2
+my_sample_col3 <- as.data.frame(my_sample_col2)
+rownames(my_sample_col3) <- df$ID
+# lets add annotations of samples
+
+# add annotations "Depth" and "soil_type" and change order
+colnames(my_sample_col3) <- c("Treatment", "Depth")
+my_sample_col3 <- my_sample_col3[, c(2,1)]
+
+```
+
+
+
+
+```{r}
+# 1. Prepare group data
+group <- as.data.frame(tax_table(ps_p))
+#group <- subset(group, metabolism == "P_cycling")
+#rownames(group) <- group$gene  # Ensure gene names are row names
+#group <- group[match(rownames(f4), rownames(group)), ]  # Match order with f4
+
+# Clean pathway names (no annotation needed)
+group$pathway <- factor(group$pathway)  # Ensure it's a factor
+
+# Order f4 rows by pathway (no gaps needed if no annotation)
+f4_ordered <- f4[order(group$pathway), ]
+
+#row_gaps <- cumsum(table(group$pathway))[-length(table(group$pathway))]
+
+
+
+#Create color palette
+my_colour = list(
+  "Treatment" = c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c"),
+  Depth = c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A"))
+
+# add gap between sample_types
+gp_col = which(diff(as.numeric(factor(my_sample_col3$Treatment)))!=0)
+```
+
+
+```{r}
+# Create a copy of the data frame to avoid modifying the original
+f4_result <- f4_ordered
+
+# Add denitrify_DNRA values to both denitrify and DNRA rows
+f4_result["denitrify", ] <- f4_result["denitrify", ] + f4_result["denitrify_DNRA", ]
+f4_result["DNRA", ] <- f4_result["DNRA", ] + f4_result["denitrify_DNRA", ]
+
+# Remove the denitrify_DNRA row
+f4_result <- f4_result[rownames(f4_result) != "denitrify_DNRA", ]
+
+f4_ordered <- f4_result
+```
+
+
+```{r}
+row.names(f4_ordered)
+```
+
+
+
+```{r}
+row.names(f4_ordered)[1] <- "ANRA"  
+row.names(f4_ordered)[2] <- "Denitrification"
+row.names(f4_ordered)[3] <- "DNRA"  
+row.names(f4_ordered)[4] <- "N fixation" 
+row.names(f4_ordered)[5] <- "Nitrification" 
+
+f4_ordered <- f4_ordered[c(4, 5, 2, 1, 3),]
+```
+
+
+
+```{r}
+p2 <- as.ggplot(function() pheatmap(f4_ordered, cluster_cols = FALSE, cluster_rows = TRUE, annotation_col = my_sample_col3, annotation_colors = my_colour, gaps_col = gp_col, color=colorRampPalette(c("navy", "white", "red"))(50), show_colnames = FALSE, legend = TRUE, border_color = NA, cellheight = 16, fontsize = 14, fontsize_row = 14, annotation_names_row = FALSE, annotation_names_col = FALSE, scale = "row"))
+
+#, gaps_row = row_gaps
+
+p2
+```
+
+
+
+### 4.3.2. gene
+
+
+Subset the N-cycling
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+ps_n <- subset_taxa(ps_RA, metabolism=="N_cycling")
+ps_n
+
+ps_n <- aggregate_rare(ps_n, level = 'gene', detection = 0/100, prevalence = 0/140)
+ps_n
+```
+
+
+
+
+```{r}
+meta <- meta(ps_n)
+
+meta$Depth <- gsub("...", "-", meta$depth, fixed = TRUE)
+
+meta$Depth[meta$Depth=="40-"] <- "40-80"
+
+
+meta$Depth[meta$Depth=="0-10"] <- "0-10 cm"
+meta$Depth[meta$Depth=="10-20"] <- "10-20 cm"
+meta$Depth[meta$Depth=="20-30"] <- "20-30 cm"
+meta$Depth[meta$Depth=="30-40"] <- "30-40 cm"
+meta$Depth[meta$Depth=="40-80"] <- "40-80 cm"
+
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+
+# Z-transform
+#ps_n_z <- microbiome::transform(ps_n, 'Z', log10 = FALSE)
+ps_n_z <- ps_n
+
+data_subset <- as(otu_table(ps_n_z), "matrix")
+data_subset <- as.matrix(data_subset)
+
+# add annotations "Depth" and "Treatment"
+my_sample_col <- data.frame(meta[c("Depth", "sample_type")], row.names = row.names(meta))
+colnames(my_sample_col) <- c("Depth", "Treatment")
+
+
+x <- as.data.frame(t(data_subset))
+y <- as.data.frame(my_sample_col)
+colnames(y) <- c("Depth", "sample_type")
+z <- dplyr::left_join(rownames_to_column(x), rownames_to_column(y), by=c("rowname" = "rowname"))
+colnames(z)[1] <- "ID"
+
+# make into mean per treatment and soil layer
+f <- z %>%
+  group_by(sample_type, Depth) %>%
+  summarise_all(mean)
+
+# remove ID column
+f <- f[ , -3]
+
+# make new ID column, which is the soiltypedepth
+library(stringr)
+f$ID <- str_c(f$sample_type, '_', f$Depth)
+
+# make new df with just sample type, depth and sampletypedepth
+df <- f[c("sample_type", "Depth", "ID")]
+# remove extra columns from f
+f2 <- f[, -c(1, 2, 29)]
+# column into rownames
+rownames(f2) <- f$ID
+# make into numeric matrix
+f3 <- data.matrix(f2, rownames.force = NA)
+f4 <- t(f3)
+
+# same for df
+# remove extra columns from df
+df2 <- df[ , -c(3)]
+# column into rownames
+rownames(df2) <- df$ID
+my_sample_col2 <- df2
+my_sample_col3 <- as.data.frame(my_sample_col2)
+rownames(my_sample_col3) <- df$ID
+# lets add annotations of samples
+
+# add annotations "Depth" and "soil_type" and change order
+colnames(my_sample_col3) <- c("Treatment", "Depth")
+my_sample_col3 <- my_sample_col3[, c(2,1)]
+
+```
+
+
+
+```{r}
+# 1. Prepare group data
+
+group <- as.data.frame(tax_table(ps_RA))
+group <- subset(group, metabolism == "N_cycling")
+rownames(group) <- group$gene  # Ensure gene names are row names
+group <- group[match(rownames(f4), rownames(group)), ]  # Match order with f4
+
+# Clean pathway names (no annotation needed)
+group$pathway <- factor(group$pathway)  # Ensure it's a factor
+
+# Order f4 rows by pathway (no gaps needed if no annotation)
+f4_ordered <- f4[order(group$pathway), ]
+
+row_gaps <- cumsum(table(group$pathway))[-length(table(group$pathway))]
+
+
+
+#Create color palette
+my_colour = list(
+  "Treatment" = c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c"),
+  Depth = c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A"))
+
+# add gap between sample_types
+gp_col = which(diff(as.numeric(factor(my_sample_col3$Treatment)))!=0)
+```
+
+
+
+
+```{r}
+p2 <- as.ggplot(function() pheatmap(f4_ordered, cluster_cols = FALSE, cluster_rows = FALSE, annotation_col = my_sample_col3, annotation_colors = my_colour, gaps_col = gp_col, color=colorRampPalette(c("navy", "white", "red"))(50), show_colnames = FALSE, legend = TRUE, border_color = NA, cellheight = 16, fontsize = 14, fontsize_row = 14, annotation_names_row = FALSE, gaps_row = row_gaps, annotation_names_col = FALSE, scale = "row"))
+
+p2
+```
+
+
+
+
+
+## 4.4. S-cycling
+
+
+
+### 4.4.1. pathway
+
+
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+
+ps_x <- subset_taxa(ps_RA, metabolism=="S_cycling")
+ps_x
+
+x <- as.data.frame(tax_table(ps_x))
+x <- x[, c(6, 1:5)]
+
+tax_table(ps_x) <- tax_table(as.matrix(x))
+
+ps_p <- aggregate_rare(ps_x, level = 'pathway', detection = 0/100, prevalence = 0/140)
+ps_p
+```
+
+
+```{r}
+meta <- meta(ps_p)
+
+meta$Depth <- gsub("...", "-", meta$depth, fixed = TRUE)
+
+meta$Depth[meta$Depth=="40-"] <- "40-80"
+
+
+meta$Depth[meta$Depth=="0-10"] <- "0-10 cm"
+meta$Depth[meta$Depth=="10-20"] <- "10-20 cm"
+meta$Depth[meta$Depth=="20-30"] <- "20-30 cm"
+meta$Depth[meta$Depth=="30-40"] <- "30-40 cm"
+meta$Depth[meta$Depth=="40-80"] <- "40-80 cm"
+
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+
+# Z-transform
+#ps_p_z <- microbiome::transform(ps_p, 'Z', log10 = FALSE)
+ps_p_z <- ps_p
+
+data_subset <- as(otu_table(ps_p_z), "matrix")
+data_subset <- as.matrix(data_subset)
+
+# add annotations "Depth" and "Treatment"
+my_sample_col <- data.frame(meta[c("Depth", "sample_type")], row.names = row.names(meta))
+colnames(my_sample_col) <- c("Depth", "Treatment")
+
+
+x <- as.data.frame(t(data_subset))
+y <- as.data.frame(my_sample_col)
+colnames(y) <- c("Depth", "sample_type")
+z <- dplyr::left_join(rownames_to_column(x), rownames_to_column(y), by=c("rowname" = "rowname"))
+colnames(z)[1] <- "ID"
+
+# make into mean per treatment and soil layer
+f <- z %>%
+  group_by(sample_type, Depth) %>%
+  summarise_all(mean)
+
+# remove ID column
+f <- f[ , -3]
+
+# make new ID column, which is the soiltypedepth
+library(stringr)
+f$ID <- str_c(f$sample_type, '_', f$Depth)
+
+# make new df with just sample type, depth and sampletypedepth
+df <- f[c("sample_type", "Depth", "ID")]
+# remove extra columns from f
+f2 <- f[, -c(1, 2, 9)]
+# column into rownames
+rownames(f2) <- f$ID
+# make into numeric matrix
+f3 <- data.matrix(f2, rownames.force = NA)
+f4 <- t(f3)
+
+# same for df
+# remove extra columns from df
+df2 <- df[ , -c(3)]
+# column into rownames
+rownames(df2) <- df$ID
+my_sample_col2 <- df2
+my_sample_col3 <- as.data.frame(my_sample_col2)
+rownames(my_sample_col3) <- df$ID
+# lets add annotations of samples
+
+# add annotations "Depth" and "soil_type" and change order
+colnames(my_sample_col3) <- c("Treatment", "Depth")
+my_sample_col3 <- my_sample_col3[, c(2,1)]
+
+```
+
+
+
+
+
+
+
+```{r}
+# 1. Prepare group data
+group <- as.data.frame(tax_table(ps_p))
+#group <- subset(group, metabolism == "P_cycling")
+#rownames(group) <- group$gene  # Ensure gene names are row names
+#group <- group[match(rownames(f4), rownames(group)), ]  # Match order with f4
+
+# Clean pathway names (no annotation needed)
+group$pathway <- factor(group$pathway)  # Ensure it's a factor
+
+# Order f4 rows by pathway (no gaps needed if no annotation)
+f4_ordered <- f4[order(group$pathway), ]
+
+row_gaps <- cumsum(table(group$pathway))[-length(table(group$pathway))]
+
+
+
+#Create color palette
+my_colour = list(
+  "Treatment" = c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c"),
+  Depth = c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A"))
+
+# add gap between sample_types
+gp_col = which(diff(as.numeric(factor(my_sample_col3$Treatment)))!=0)
+```
+
+
+```{r}
+row.names(f4_ordered)
+```
+
+```{r}
+# Create a copy of the data frame to avoid modifying the original
+f4_result <- f4_ordered
+
+# Add denitrify_DNRA values to both denitrify and DNRA rows
+f4_result["ASR", ] <- f4_result["ASR", ] + f4_result["DSR_ASR", ]
+f4_result["DSR", ] <- f4_result["DSR", ] + f4_result["DSR_ASR", ]
+
+# Remove the denitrify_DNRA row
+f4_result <- f4_result[rownames(f4_result) != "DSR_ASR", ]
+
+f4_ordered <- f4_result
+```
+
+
+```{r}
+row.names(f4_ordered)
+```
+
+
+
+```{r}
+row.names(f4_ordered)[1] <- "ASR"  
+row.names(f4_ordered)[2] <- "DSR"
+row.names(f4_ordered)[3] <- "S oxidation"  
+row.names(f4_ordered)[4] <- "S reduction" 
+row.names(f4_ordered)[5] <- "Sulfide oxidation" 
+
+f4_ordered <- f4_ordered[c(5, 3, 4, 1, 2),]
+```
+
+
+
+
+```{r}
+p2 <- as.ggplot(function() pheatmap(f4_ordered, cluster_cols = FALSE, cluster_rows = FALSE, annotation_col = my_sample_col3, annotation_colors = my_colour, gaps_col = gp_col, color=colorRampPalette(c("navy", "white", "red"))(50), show_colnames = FALSE, legend = TRUE, border_color = NA, cellheight = 16, fontsize = 14, fontsize_row = 14, annotation_names_row = FALSE, annotation_names_col = FALSE, scale = "row"))
+#, gaps_row = row_gaps
+p2
+```
+
+
+### 4.4.2. gene
+
+
+Subset the S-cycling
+
+```{r}
+ps_RA <- transform(ps, "compositional")
+ps_n <- subset_taxa(ps_RA, metabolism=="S_cycling")
+ps_n
+
+ps_n <- aggregate_rare(ps_n, level = 'gene', detection = 0/100, prevalence = 0/140)
+ps_n
+```
+
+
+
+
+```{r}
+meta <- meta(ps_n)
+
+meta$Depth <- gsub("...", "-", meta$depth, fixed = TRUE)
+
+meta$Depth[meta$Depth=="40-"] <- "40-80"
+
+
+meta$Depth[meta$Depth=="0-10"] <- "0-10 cm"
+meta$Depth[meta$Depth=="10-20"] <- "10-20 cm"
+meta$Depth[meta$Depth=="20-30"] <- "20-30 cm"
+meta$Depth[meta$Depth=="30-40"] <- "30-40 cm"
+meta$Depth[meta$Depth=="40-80"] <- "40-80 cm"
+
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+
+# Z-transform
+#ps_n_z <- microbiome::transform(ps_n, 'Z', log10 = FALSE)
+ps_n_z <- ps_n
+
+data_subset <- as(otu_table(ps_n_z), "matrix")
+data_subset <- as.matrix(data_subset)
+
+# add annotations "Depth" and "Treatment"
+my_sample_col <- data.frame(meta[c("Depth", "sample_type")], row.names = row.names(meta))
+colnames(my_sample_col) <- c("Depth", "Treatment")
+
+
+x <- as.data.frame(t(data_subset))
+y <- as.data.frame(my_sample_col)
+colnames(y) <- c("Depth", "sample_type")
+z <- dplyr::left_join(rownames_to_column(x), rownames_to_column(y), by=c("rowname" = "rowname"))
+colnames(z)[1] <- "ID"
+
+# make into mean per treatment and soil layer
+f <- z %>%
+  group_by(sample_type, Depth) %>%
+  summarise_all(mean)
+
+# remove ID column
+f <- f[ , -3]
+
+# make new ID column, which is the soiltypedepth
+library(stringr)
+f$ID <- str_c(f$sample_type, '_', f$Depth)
+
+# make new df with just sample type, depth and sampletypedepth
+df <- f[c("sample_type", "Depth", "ID")]
+# remove extra columns from f
+f2 <- f[, -c(1, 2, 29)]
+# column into rownames
+rownames(f2) <- f$ID
+# make into numeric matrix
+f3 <- data.matrix(f2, rownames.force = NA)
+f4 <- t(f3)
+
+# same for df
+# remove extra columns from df
+df2 <- df[ , -c(3)]
+# column into rownames
+rownames(df2) <- df$ID
+my_sample_col2 <- df2
+my_sample_col3 <- as.data.frame(my_sample_col2)
+rownames(my_sample_col3) <- df$ID
+# lets add annotations of samples
+
+# add annotations "Depth" and "soil_type" and change order
+colnames(my_sample_col3) <- c("Treatment", "Depth")
+my_sample_col3 <- my_sample_col3[, c(2,1)]
+
+```
+
+
+
+```{r}
+# 1. Prepare group data
+
+group <- as.data.frame(tax_table(ps_RA))
+group <- subset(group, metabolism == "S_cycling")
+rownames(group) <- group$gene  # Ensure gene names are row names
+group <- group[match(rownames(f4), rownames(group)), ]  # Match order with f4
+
+# Clean pathway names (no annotation needed)
+group$pathway <- factor(group$pathway)  # Ensure it's a factor
+
+# Order f4 rows by pathway (no gaps needed if no annotation)
+f4_ordered <- f4[order(group$pathway), ]
+
+row_gaps <- cumsum(table(group$pathway))[-length(table(group$pathway))]
+
+
+
+#Create color palette
+my_colour = list(
+  "Treatment" = c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c"),
+  Depth = c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A"))
+
+# add gap between sample_types
+gp_col = which(diff(as.numeric(factor(my_sample_col3$Treatment)))!=0)
+```
+
+
+
+
+```{r}
+p2 <- as.ggplot(function() pheatmap(f4_ordered, cluster_cols = FALSE, cluster_rows = FALSE, annotation_col = my_sample_col3, annotation_colors = my_colour, gaps_col = gp_col, color=colorRampPalette(c("navy", "white", "red"))(50), show_colnames = FALSE, legend = TRUE, border_color = NA, cellheight = 16, fontsize = 14, fontsize_row = 14, annotation_names_row = FALSE, gaps_row = row_gaps, annotation_names_col = FALSE, scale = "row"))
+
+p2
+```
+
+
+
+
+
+
+
+# 5. Differential abundance analysis: MaAsLin2
+
+
+
+MaAsLin2 (Microbiome Multivariate Analysis)
+Handles relative abundance data.
+
+Works with generalized linear models (GLMs).
+
+
+I will be using NPS-cycling genes only (and one unknown which can be ignored)
+
+
+in the final model i want to use relative abundances and use CPLM instead of the LM model. This is because with LM model I would need to use LOG transformation or something similar, but this is problem with zero values. I also dont want to add a pseudocount as this creates other issues. In CPLM I can exclude the LOG transformation. In fact "All the non-LM models use an intrinsic log link transformation due to their close connection to GLMs and they are recommended to be run with transform = NONE."
+
+The CPLM is meant to be used with non-count data as RA data is.
+
+
+
+
+## 5.1. Metabolic level
+
+Forest excluded due to too small replicate number!
+
+
+
+```{r}
+ps_x <- aggregate_rare(ps_RA, level = 'metabolism', detection = 0/100, prevalence = 0/140)
+ps_x
+
+# remove "Unknown"
+ps_x <- subset_taxa(ps_x, metabolism!="Unknown")
+ps_x
+
+tax <- as.data.frame(tax_table(ps_x))
+
+```
+
+```{r}
+#To remove those from your phyloseq object
+ps_y <- subset_samples(ps_x, sample_type!="forest")
+#This will return a ps object with the samples removed
+ps_y
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_y),
+              MARGIN = ifelse(taxa_are_rows(ps_y), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_y = prune_taxa((prev0 > 0), ps_y)
+ps_y
+
+```
+
+```{r}
+# Run MaAsLin2
+library(Maaslin2)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer\\GENE_MaAsLin2\\Metabolic_level_WITH_CO2')
+
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+# this is how the analysis was run
+
+#fit_data <- Maaslin2(
+#  input_data = gene_data,
+#  input_metadata = metadata,
+#  output = "maaslin_METABOLISM_TREATMENT_and_LAYER",
+#  fixed_effects = c('Layer', 'Treatment'), # my grouping variable(s)
+#  normalization = "NONE",          # Use CLR for relative abundances
+#  transform = "NONE",             # No extra transform (data is already proportional)
+#  analysis_method = "CPLM", #DEFAULT:
+#  correction = "BH",               # Benjamini-Hochberg FDR correction
+#  plot_heatmap = TRUE,
+#  reference = 'Treatment,Meadow'
+#  )
+```
+
+
+
+
+
+
+## 5.2. CO2 fixing: genes
+
+
+Forest excluded due to too small replicate number!
+
+```{r}
+ps_x <- subset_taxa(ps_RA, metabolism=="CO2_fixing")
+ps_x
+
+```
+
+
+
+```{r}
+ps_RA_phyla_aggr_good <- microbiome::aggregate_rare(ps_x, level = 'gene', detection = 0/140, prevalence = 0/140)
+ps_RA_phyla_aggr_good
+```
+
+
+
+### 5.2.1. With Meadow
+
+```{r}
+#To remove those from your phyloseq object
+ps_y <- subset_samples(ps_RA_phyla_aggr_good, sample_type!="forest")
+#This will return a ps object with the samples removed
+ps_y
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_y),
+              MARGIN = ifelse(taxa_are_rows(ps_y), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_y = prune_taxa((prev0 > 0), ps_y)
+ps_y
+
+```
+
+```{r}
+# Run MaAsLin2
+library(Maaslin2)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer\\GENE_MaAsLin2\\CO2_fixing_GENE')
+
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+#fit_data <- Maaslin2(
+# input_data = gene_data,
+#  input_metadata = metadata,
+#  output = "TREATMENT_and_LAYER",
+#  fixed_effects = c('Layer', 'Treatment'), # my grouping variable(s)
+#  normalization = "NONE",          # Use CLR for relative abundances
+#  transform = "NONE",             # No extra transform (data is already proportional)
+#  analysis_method = "CPLM", #DEFAULT:
+#  correction = "BH",               # Benjamini-Hochberg FDR correction
+#  plot_heatmap = TRUE,
+#  reference = 'Treatment,Meadow'
+#  )
+```
+
+
+
+
+
+### 5.2.2. Without Meadow
+
+
+
+
+```{r}
+#To remove those from your phyloseq object
+ps_y <- subset_samples(ps_RA_phyla_aggr_good, sample_type!="forest" & sample_type!="meadow")
+#This will return a ps object with the samples removed
+ps_y
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_y),
+              MARGIN = ifelse(taxa_are_rows(ps_y), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_y = prune_taxa((prev0 > 0), ps_y)
+ps_y
+
+```
+
+```{r}
+# Run MaAsLin2
+library(Maaslin2)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer\\GENE_MaAsLin2\\CO2_fixing_GENE')
+
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+#fit_data <- Maaslin2(
+#  input_data = gene_data,
+#  input_metadata = metadata,
+#  output = "TREATMENT_and_LAYER_WO_MEADOW",
+#  fixed_effects = c('Layer', 'Treatment'), # my grouping variable(s)
+#  normalization = "NONE",          # Use CLR for relative abundances
+#  transform = "NONE",             # No extra transform (data is already proportional)
+#  analysis_method = "CPLM", #DEFAULT:
+#  correction = "BH",               # Benjamini-Hochberg FDR correction
+#  plot_heatmap = TRUE,
+#  reference = 'Treatment,Conventional'
+#  )
+```
+
+
+
+
+
+## 5.3. CO2 fixing: pathway
+
+
+Forest excluded due to too small replicate number!
+
+```{r}
+ps_x <- subset_taxa(ps_RA, metabolism=="CO2_fixing")
+ps_x
+```
+
+
+
+
+```{r}
+ps_RA_phyla_aggr_good <- microbiome::aggregate_rare(ps_x, level = 'pathway', detection = 0/140, prevalence = 0/140)
+ps_RA_phyla_aggr_good
+```
+
+
+### 5.3.1. With meadow
+
+
+
+```{r}
+#To remove those from your phyloseq object
+ps_y <- subset_samples(ps_RA_phyla_aggr_good, sample_type!="forest")
+#This will return a ps object with the samples removed
+ps_y
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_y),
+              MARGIN = ifelse(taxa_are_rows(ps_y), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_y = prune_taxa((prev0 > 0), ps_y)
+ps_y
+
+```
+
+
+
+
+```{r}
+# Run MaAsLin2
+library(Maaslin2)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer\\GENE_MaAsLin2\\CO2_fixing_pathway')
+
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+#fit_data <- Maaslin2(
+#  input_data = gene_data,
+#  input_metadata = metadata,
+#  output = "TREATMENT_and_LAYER_WITH_MEADOW",
+#  fixed_effects = c('Layer', 'Treatment'), # my grouping variable(s)
+#  normalization = "NONE",          # Use CLR for relative abundances
+#  transform = "NONE",             # No extra transform (data is already proportional)
+#  analysis_method = "CPLM", #DEFAULT:
+#  correction = "BH",               # Benjamini-Hochberg FDR correction
+#  plot_heatmap = TRUE,
+#  reference = 'Treatment,Meadow'
+#  )
+
+```
+
+
+
+
+### 5.3.2. Without meadow
+
+
+
+```{r}
+#To remove those from your phyloseq object
+ps_y <- subset_samples(ps_RA_phyla_aggr_good, sample_type!="forest" & sample_type!="meadow")
+#This will return a ps object with the samples removed
+ps_y
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_y),
+              MARGIN = ifelse(taxa_are_rows(ps_y), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_y = prune_taxa((prev0 > 0), ps_y)
+ps_y
+
+```
+
+
+
+
+```{r}
+# Run MaAsLin2
+library(Maaslin2)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer\\GENE_MaAsLin2\\CO2_fixing_pathway')
+
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+#fit_data <- Maaslin2(
+#  input_data = gene_data,
+#  input_metadata = metadata,
+#  output = "TREATMENT_and_LAYER_WO_MEADOW",
+#  fixed_effects = c('Layer', 'Treatment'), # my grouping variable(s)
+#  normalization = "NONE",          # Use CLR for relative abundances
+#  transform = "NONE",             # No extra transform (data is already proportional)
+#  analysis_method = "CPLM", #DEFAULT:
+#  correction = "BH",               # Benjamini-Hochberg FDR correction
+#  plot_heatmap = TRUE,
+#  reference = 'Treatment,Conventional'
+#  )
+
+```
+
+
+
+
+
+
+## 5.4. P cycling: genes
+
+
+
+Forest excluded due to too small replicate number!
+
+```{r}
+ps_x <- subset_taxa(ps_RA, metabolism=="P_cycling")
+ps_x
+```
+
+
+
+
+```{r}
+ps_RA_phyla_aggr_good <- microbiome::aggregate_rare(ps_x, level = 'gene', detection = 0/140, prevalence = 0/140)
+ps_RA_phyla_aggr_good
+```
+
+
+
+
+### 5.4.1. With Meadow
+
+```{r}
+#To remove those from your phyloseq object
+ps_y <- subset_samples(ps_RA_phyla_aggr_good, sample_type!="forest")
+#This will return a ps object with the samples removed
+ps_y
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_y),
+              MARGIN = ifelse(taxa_are_rows(ps_y), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_y = prune_taxa((prev0 > 0), ps_y)
+ps_y
+
+```
+
+```{r}
+# Run MaAsLin2
+library(Maaslin2)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer\\GENE_MaAsLin2\\P_cycling_GENE')
+
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+#fit_data <- Maaslin2(
+#  input_data = gene_data,
+#  input_metadata = metadata,
+#  output = "TREATMENT_and_LAYER",
+#  fixed_effects = c('Layer', 'Treatment'), # my grouping variable(s)
+#  normalization = "NONE",          # Use CLR for relative abundances
+#  transform = "NONE",             # No extra transform (data is already proportional)
+#  analysis_method = "CPLM", #DEFAULT:
+#  correction = "BH",               # Benjamini-Hochberg FDR correction
+#  plot_heatmap = TRUE,
+#  reference = 'Treatment,Meadow'
+#  )
+```
+
+
+
+
+
+### 5.4.2. Without Meadow
+
+
+
+
+```{r}
+#To remove those from your phyloseq object
+ps_y <- subset_samples(ps_RA_phyla_aggr_good, sample_type!="forest" & sample_type!="meadow")
+#This will return a ps object with the samples removed
+ps_y
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_y),
+              MARGIN = ifelse(taxa_are_rows(ps_y), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_y = prune_taxa((prev0 > 0), ps_y)
+ps_y
+
+```
+
+```{r}
+# Run MaAsLin2
+library(Maaslin2)
+
+setwd('C:\\Users\\lehakkin\\RStudio_computer\\GENE_MaAsLin2\\P_cycling_GENE')
+
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+#fit_data <- Maaslin2(
+#  input_data = gene_data,
+#  input_metadata = metadata,
+#  output = "TREATMENT_and_LAYER_WO_MEADOW",
+#  fixed_effects = c('Layer', 'Treatment'), # my grouping variable(s)
+#  normalization = "NONE",          # Use CLR for relative abundances
+#  transform = "NONE",             # No extra transform (data is already proportional)
+#  analysis_method = "CPLM", #DEFAULT:
+#  correction = "BH",               # Benjamini-Hochberg FDR correction
+#  plot_heatmap = TRUE,
+#  reference = 'Treatment,Conventional'
+#  )
+```
+
+
+
+## 5.5. P-cycling: pathway
+
+etc for different metabolism:
+
+N-cycling
+
+S-cycling
+
+
+
+
+
+# 6. METABOLISM FIGURES
+
+
+Metabolic pathways
+
+
+
+```{r}
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+sample_data(ps_RA) <- sample_data(meta)
+ps_x <- ps_RA
+ps_x
+```
+
+
+
+```{r}
+ps_y <- aggregate_rare(ps_x, level = 'metabolism', detection = 0/100, prevalence = 0/140)
+ps_y
+
+ps_y <- subset_taxa(ps_y, metabolism!="CO2_fixing")
+ps_y
+```
+
+
+
+```{r}
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+```
+
+```{r}
+names(gene_data)
+```
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+## N, P, S combined 
+
+
+
+```{r}
+# create your own color palette for sample types
+MyPalette <- c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c")
+```
+
+
+Reshape df
+
+```{r}
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+
+df_long <- df %>%
+  pivot_longer(
+    cols = c(N_cycling, P_cycling, S_cycling),  # Columns to combine
+    names_to = "Metabolism",  # New column for GH/GT
+    values_to = "Proportion"  # New column for values
+  )
+```
+
+
+
+```{r}
+fig <- df_long %>%
+  group_by(sample_type, depth_numerical, Metabolism) %>%
+  summarise(
+    mean = mean(Proportion, na.rm = TRUE),
+    se = sd(Proportion, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  ungroup() %>%
+  ggplot(aes(
+    y = mean,
+    x = depth_numerical,
+    color = sample_type
+  )) +
+  geom_line(position = position_dodge(1.2)) +
+  geom_point(size = 2, position = position_dodge(1.2)) +
+  geom_errorbar(
+    aes(ymin = mean - se, ymax = mean + se),
+    width = 0.3,
+    position = position_dodge(1.2),
+    linetype = "solid",
+    alpha = 0.5
+  ) +
+  coord_flip() +
+  scale_x_reverse() +
+  facet_wrap(~ Metabolism, 
+             scales = "free_x",
+             labeller = labeller(Metabolism = c(
+               "N_cycling" = "N cycling genes",
+               "P_cycling" = "P cycling genes", 
+               "S_cycling" = "S cycling genes"
+             ))) +
+  scale_colour_manual(values = MyPalette) +
+  labs(
+    x = "Soil layer",
+    y = "Proportion",
+    color = "Treatment"
+  ) +
+  theme_cowplot() +
+  theme(
+    axis.text = element_text(size = 18),
+    axis.title = element_text(size = 22, face = "bold"),
+    legend.text = element_text(size = 22),
+    legend.title = element_text(size = 22),
+    plot.title = element_text(size = 22, hjust = 0.5),
+    panel.border = element_rect(colour = "black", fill = NA, size = 0.5),
+    strip.text = element_text(size = 22, face = "bold")
+  ) +
+  scale_x_reverse(
+    breaks = c(60, 35, 25, 15, 5),
+    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
+  ) + theme(legend.title=element_blank())
+
+print(fig)
+```
+
+
+
+
+
+
+
+## 6.1. N_cycling
+
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+N_cycling <- ggplot(df, aes(x = Layer, y = N_cycling, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "N cycle") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+N_cycling
+
+```
+
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+## 6.2. P_cycling
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+P_cycling <- ggplot(df, aes(x = Layer, y = P_cycling, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "P cycle") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+P_cycling
+
+```
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+## 6.3. S_cycling
+
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+S_cycling <- ggplot(df, aes(x = Layer, y = S_cycling, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "S cycle") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+S_cycling
+
+```
+
+
+
+
+
+
+
+
+## 6.4. CO2 fixing pathway
+
+
+
+
+```{r}
+ps_y <- aggregate_rare(ps_x, level = 'metabolism', detection = 0/100, prevalence = 0/140)
+ps_y
+
+ps_y <- subset_taxa(ps_y, metabolism=="CO2_fixing")
+ps_y
+```
+
+
+
+```{r}
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+```
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+
+```{r}
+# create your own color palette for sample types
+MyPalette <- c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c")
+```
+
+
+Reshape df
+
+```{r}
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+
+df_long <- df %>%
+  pivot_longer(
+    cols = c(CO2_fixing),  # Columns to combine
+    names_to = "Metabolism",  # New column for GH/GT
+    values_to = "Proportion"  # New column for values
+  )
+```
+
+
+
+```{r}
+fig <- df_long %>%
+  group_by(sample_type, depth_numerical, Metabolism) %>%
+  summarise(
+    mean = mean(Proportion, na.rm = TRUE),
+    se = sd(Proportion, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  ungroup() %>%
+  ggplot(aes(
+    y = mean,
+    x = depth_numerical,
+    color = sample_type
+  )) +
+  geom_line(position = position_dodge(1.2)) +
+  geom_point(size = 2, position = position_dodge(1.2)) +
+  geom_errorbar(
+    aes(ymin = mean - se, ymax = mean + se),
+    width = 0.3,
+    position = position_dodge(1.2),
+    linetype = "solid",
+    alpha = 0.5
+  ) +
+  coord_flip() +
+  scale_x_reverse() +
+  facet_wrap(~ Metabolism, 
+             scales = "free_x",
+             labeller = labeller(Metabolism = c(
+               "CO2_fixing" = "C fixation key genes"
+             ))) +
+  scale_colour_manual(values = MyPalette) +
+  labs(
+    x = "Soil layer",
+    y = "Proportion",
+    color = "Treatment"
+  ) +
+  theme_cowplot() +
+  theme(
+    axis.text = element_text(size = 18),
+    axis.title = element_text(size = 22, face = "bold"),
+    legend.text = element_text(size = 22),
+    legend.title = element_text(size = 22),
+    plot.title = element_text(size = 22, hjust = 0.5),
+    panel.border = element_rect(colour = "black", fill = NA, size = 0.5),
+    strip.text = element_text(size = 22, face = "bold")
+  ) +
+  scale_x_reverse(
+    breaks = c(60, 35, 25, 15, 5),
+    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
+  ) + theme(legend.title=element_blank())
+
+print(fig)
+```
+
+
+
+
+
+Soil layer Treatment
+
+
+
+```{r}
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+sample_data(ps_RA) <- sample_data(meta)
+ps_x <- subset_taxa(ps_RA, metabolism=="CO2_fixing")
+ps_x
+```
+
+
+
+```{r}
+ps_y <- aggregate_rare(ps_x, level = 'pathway', detection = 0/100, prevalence = 0/140)
+ps_y
+```
+
+
+
+```{r}
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+```
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+ Calvin_cycle
+
+
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+Calvin_cycle <- ggplot(df, aes(x = Layer, y = Calvin_cycle, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "Calvin cycle\n") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+Calvin_cycle
+
+```
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+hydroxypropionate_bicycle <- ggplot(df, aes(x = Layer, y = hydroxypropionate_bicycle, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "Hydroxy-propionate-\nbi-cycle") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+hydroxypropionate_bicycle
+
+```
+
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+Arnon_Buchanan_cycle
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+Arnon_Buchanan_cycle <- ggplot(df, aes(x = Layer, y = Arnon_Buchanan_cycle, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "Arnon-Buchanan-\ncycle") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+Arnon_Buchanan_cycle
+
+```
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+Wood_Ljungdahl_pathway
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+Wood_Ljungdahl_pathway <- ggplot(df, aes(x = Layer, y = Wood_Ljungdahl_pathway, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "Wood-Ljungdahl-\npathway") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+Wood_Ljungdahl_pathway
+
+```
+
+
+
+
+
+
+
+## 6.5. P-cycling pathway
+
+
+
+
+```{r}
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+sample_data(ps_RA) <- sample_data(meta)
+ps_x <- subset_taxa(ps_RA, metabolism=="P_cycling")
+ps_x
+
+x <- as.data.frame(tax_table(ps_x))
+x <- x[, c(1, 5, 6, 2, 4, 3)]
+x <- as.matrix(x)
+tax_table(ps_x) <- tax_table(x)
+```
+
+
+
+```{r}
+ps_y <- aggregate_rare(ps_x, level = 'pathway', detection = 0/100, prevalence = 0/140)
+ps_y
+```
+
+
+
+```{r}
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+```
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+P_starv
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+P_starv <- ggplot(df, aes(x = Layer, y = P_starv, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "P starvation\n") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+P_starv
+
+```
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+Pinorg_solub
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+Pinorg_solub <- ggplot(df, aes(x = Layer, y = Pinorg_solub, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "P-inorganic\nsolubilization") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+Pinorg_solub
+
+```
+
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+Porg_miner
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+Porg_miner <- ggplot(df, aes(x = Layer, y = Porg_miner, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "P-organic\nmineralization") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+Porg_miner
+
+```
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+## 6.6. N-cycling pathway
+
+
+
+
+
+
+```{r}
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+sample_data(ps_RA) <- sample_data(meta)
+ps_x <- subset_taxa(ps_RA, metabolism=="N_cycling")
+ps_x
+
+x <- as.data.frame(tax_table(ps_x))
+x <- x[, c(1, 5, 6, 2, 4, 3)]
+x <- as.matrix(x)
+tax_table(ps_x) <- tax_table(x)
+```
+
+
+
+```{r}
+ps_y <- aggregate_rare(ps_x, level = 'pathway', detection = 0/100, prevalence = 0/140)
+ps_y
+```
+
+
+
+```{r}
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+```
+
+```{r}
+names(gene_data)
+```
+
+
+
+First, lets add the denitrify_DNRA to both denitrify and DNRA
+
+```{r}
+# Add denitrify_DNRA to denitrify
+gene_data$denitrify <- gene_data$denitrify + gene_data$denitrify_DNRA
+
+# Add denitrify_DNRA to DNRA
+gene_data$DNRA <- gene_data$DNRA + gene_data$denitrify_DNRA
+```
+
+
+
+
+
+ANRA
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+ANRA <- ggplot(df, aes(x = Layer, y = ANRA, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "ANRA\n") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+ANRA
+
+```
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+denitrify
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+denitrify <- ggplot(df, aes(x = Layer, y = denitrify, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "Denitrification") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+denitrify
+
+```
+
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+DNRA
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+DNRA <- ggplot(df, aes(x = Layer, y = DNRA, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "DNRA") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+DNRA
+
+```
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+N_fix
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+N_fix <- ggplot(df, aes(x = Layer, y = N_fix, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "N fixation") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+N_fix
+
+```
+
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+nitrify
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+nitrify <- ggplot(df, aes(x = Layer, y = nitrify, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "Nitrification") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+nitrify
+
+```
+
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+## 6.7. S-cycling pathway
+
+
+
+
+
+```{r}
+meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
+sample_data(ps_RA) <- sample_data(meta)
+ps_x <- subset_taxa(ps_RA, metabolism=="S_cycling")
+ps_x
+
+x <- as.data.frame(tax_table(ps_x))
+x <- x[, c(1, 5, 6, 2, 4, 3)]
+x <- as.matrix(x)
+tax_table(ps_x) <- tax_table(x)
+```
+
+
+
+```{r}
+ps_y <- aggregate_rare(ps_x, level = 'pathway', detection = 0/100, prevalence = 0/140)
+ps_y
+```
+
+
+
+```{r}
+## get the otu table
+gene_data <- as.data.frame(otu_table(ps_y))
+gene_data <- as.data.frame(t(gene_data))
+
+metadata <- meta(ps_y)
+
+metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
+
+metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+
+
+metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
+metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
+metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
+metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
+metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
+
+metadata$Layer <- as.factor(metadata$Layer)
+levels(metadata$Layer)
+
+metadata$Treatment <- metadata$sample_type
+metadata$Treatment <- as.character(metadata$Treatment)
+
+metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
+metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
+metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
+metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+
+```
+
+```{r}
+names(gene_data)
+```
+
+First, lets add the DSR_ASR to both DSR and ASR
+
+```{r}
+# Add denitrify_DNRA to denitrify
+gene_data$DSR <- gene_data$DSR + gene_data$DSR_ASR
+
+# Add denitrify_DNRA to DNRA
+gene_data$ASR <- gene_data$ASR + gene_data$DSR_ASR
+```
+
+
+
+ASR
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+ASR <- ggplot(df, aes(x = Layer, y = ASR, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "ASRA") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+ASR
+
+```
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+DSR
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+DSR <- ggplot(df, aes(x = Layer, y = DSR, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "DSR") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+DSR
+
+```
+
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+S_ox
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+S_ox <- ggplot(df, aes(x = Layer, y = S_ox, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "S oxidation") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+S_ox
+
+```
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+S_red
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+S_red <- ggplot(df, aes(x = Layer, y = S_red, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "S reduction") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+S_red
+
+```
+
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+Sulfide_ox
+
+
+
+```{r}
+my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
+
+#left join
+df <- merge(metadata, gene_data, by=0, all.x=TRUE)
+
+Sulfide_ox <- ggplot(df, aes(x = Layer, y = Sulfide_ox, fill = Layer)) +
+  geom_boxplot(outlier.shape = NA) +  
+  geom_jitter(
+    aes(fill = Layer),
+    shape = 21,
+    color = "black",
+    stroke = 0.3,
+    width = 0.2,
+    alpha = 0.5,
+    size = 2
+  ) +  
+  scale_fill_manual(values = my_colour) +
+  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
+  labs(x = "", y = "Sulfide oxidation") +  
+  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
+  theme_cowplot() +  
+  theme(
+    legend.position = "none",  
+    axis.title.y = element_text(size = 14),  
+    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
+    axis.text.y = element_text(size = 12),
+    axis.title = element_text(face = "bold"),
+    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
+    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
+    panel.spacing = unit(1, "cm")
+  )
+
+Sulfide_ox
+
+```
+
+
+
+
+```{r}
+names(gene_data)
+```
+
+
+
+
+# 7. METABOLISM Heatmap
+
+
+
+
+
+```{r}
+ps_x <- aggregate_rare(ps_RA, level = 'metabolism', detection = 0/100, prevalence = 0/140)
+ps_x
+
+# remove "Unknown"
+ps_x <- subset_taxa(ps_x, metabolism!="Unknown")
+ps_x
+
+tax <- as.data.frame(tax_table(ps_x))
+```
+
+I will do heatmap for RA values.
+
+For the final heatmap figure the RA values will be standardizes (z-transformed)
+
+Note! I will not do Z-transforming the data before plotting the heatmap. Instead I will do row scaling in the Pheatmap stage, which means that each gene's relative abundance is standardized
+
+
+
+
+
+```{r}
+meta <- meta(ps_x)
+
+meta$Depth <- gsub("...", "-", meta$depth, fixed = TRUE)
+
+meta$Depth[meta$Depth=="40-"] <- "40-80"
+
+
+meta$Depth[meta$Depth=="0-10"] <- "0-10 cm"
+meta$Depth[meta$Depth=="10-20"] <- "10-20 cm"
+meta$Depth[meta$Depth=="20-30"] <- "20-30 cm"
+meta$Depth[meta$Depth=="30-40"] <- "30-40 cm"
+meta$Depth[meta$Depth=="40-80"] <- "40-80 cm"
+
+
+data_subset <- as(otu_table(ps_x), "matrix")
+data_subset <- as.matrix(data_subset)
+
+# add annotations "Depth" and "Treatment"
+my_sample_col <- data.frame(meta[c("Depth", "sample_type")], row.names = row.names(meta))
+colnames(my_sample_col) <- c("Depth", "Treatment")
+
+
+x <- as.data.frame(t(data_subset))
+y <- as.data.frame(my_sample_col)
+colnames(y) <- c("Depth", "sample_type")
+z <- dplyr::left_join(rownames_to_column(x), rownames_to_column(y), by=c("rowname" = "rowname"))
+colnames(z)[1] <- "ID"
+
+# make into mean per treatment and soil layer
+f <- z %>%
+  group_by(sample_type, Depth) %>%
+  summarise_all(mean)
+
+# remove ID column
+f <- f[ , -3]
+
+# make new ID column, which is the soiltypedepth
+library(stringr)
+f$ID <- str_c(f$sample_type, '_', f$Depth)
+
+# make new df with just sample type, depth and sampletypedepth
+df <- f[c("sample_type", "Depth", "ID")]
+# remove extra columns from f
+f2 <- f[, -c(1, 2, 7)]
+# column into rownames
+rownames(f2) <- f$ID
+# make into numeric matrix
+f3 <- data.matrix(f2, rownames.force = NA)
+f4 <- t(f3)
+
+# same for df
+# remove extra columns from df
+df2 <- df[ , -c(3)]
+# column into rownames
+rownames(df2) <- df$ID
+my_sample_col2 <- df2
+my_sample_col3 <- as.data.frame(my_sample_col2)
+rownames(my_sample_col3) <- df$ID
+# lets add annotations of samples
+
+# add annotations "Depth" and "soil_type" and change order
+colnames(my_sample_col3) <- c("Treatment", "Depth")
+my_sample_col3 <- my_sample_col3[, c(2,1)]
+
+```
+
+
+
+
+
+
+
+
+
+```{r}
+# 1. Prepare group data
+group <- tax
+group <- group[match(rownames(f4), rownames(group)), ]  # Match order with f4
+
+# Clean pathway names (no annotation needed)
+group$metabolism <- factor(group$metabolism)  # Ensure it's a factor
+
+# Order f4 rows by pathway (no gaps needed if no annotation)
+f4_ordered <- f4[order(group$metabolism), ]
+
+row_gaps <- cumsum(table(group$metabolism))[-length(table(group$metabolism))]
+
+
+
+#Create color palette
+my_colour = list(
+  "Treatment" = c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c"),
+  Depth = c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A"))
+
+# add gap between sample_types
+gp_col = which(diff(as.numeric(factor(my_sample_col3$Treatment)))!=0)
+```
+
+
+```{r}
+row.names(f4_ordered)
+```
+
+
+```{r}
+# Change pathway names
+# row of data frame
+
+row.names(f4_ordered)[1] <- "CO2 fixing" 
+row.names(f4_ordered)[2] <- "N cycling" 
+row.names(f4_ordered)[3] <- "P cycling" 
+row.names(f4_ordered)[4] <- "S cycling" 
+```
+
+
+
+
+
+
+```{r}
+library(ggplotify)
+library(pheatmap)
+p <- as.ggplot(function() pheatmap(f4_ordered, cluster_cols = FALSE, cluster_rows = FALSE, annotation_col = my_sample_col3, annotation_colors = my_colour, gaps_col = gp_col, color=colorRampPalette(c("navy", "white", "red"))(50), show_colnames = FALSE, legend = TRUE, border_color = NA, cellheight = 16, fontsize = 14, fontsize_row = 14, annotation_names_row = FALSE, gaps_row = FALSE, annotation_names_col = FALSE, scale = "row"))
+
+p
+```
+
+
+
+
+
+
+
+```{r}
+rm(list = ls())
+```
+
+
+
+
+
+
+
