@@ -905,6 +905,30 @@ metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
 
 ## 7.2. CAZyme classes: GLMM
 
+```{r}
+library('phyloseq')
+library("cowplot")
+library("dplyr")
+library("ggplot2")
+library("vegan")
+library("microbiome")
+library("tibble")
+library("readxl")
+library(tidyverse)
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(glmmTMB)
+library(car)
+library(emmeans)
+library(DHARMa)
+library(performance)
+library(ggplot2)
+library(dplyr)
+library(multcomp)
+```
+
+
 
 ```{r}
 ps_RA <- transform(ps, "compositional")
