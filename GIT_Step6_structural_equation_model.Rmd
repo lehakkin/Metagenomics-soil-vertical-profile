@@ -313,121 +313,114 @@ grep("CAZyme|KEGG", names(combined_data), value = TRUE)
 
 Preliminary analysis revealed that CAZymes composition correlated with soil carbon stocks the most and is thus kept in the final SEM
 
-
 ```{r}
+
+library(lme4)
 library(piecewiseSEM)
 
-df <- combined_data[, c("sampleID", "Depth (numerical)", "treatment", "C", "CAZyme_PCoA1", "KEGG_PCoA1", "pH","Al-ox", "Fe-ox", "Lignin", "Glucans", "Hemicellulose", "Chitin", "Root biomass")]
-colnames(df)[which(names(df) == "Al-ox")] <- "Al_ox"
-colnames(df)[which(names(df) == "Fe-ox")] <- "Fe_ox"
-colnames(df)[which(names(df) == "Root biomass")] <- "log_root"
-colnames(df)[which(names(df) == "Depth (numerical)")] <- "depth_numerical"
-
-
-#create dummy variables
-df$Conventional <- ifelse(df$treatment == 'Conventional', 1, 0)
-df$Organic <- ifelse(df$treatment == 'Organic', 1, 0)
-
 m.sem <- psem(
-  lm(pH ~ Organic + Conventional + depth_numerical, data = df),
-  lm(Al_ox ~ pH + Organic + Conventional + depth_numerical, data = df),
-  lm(Fe_ox ~ pH + Organic + Conventional, data = df),
-  lm(log_root ~ Organic + Conventional + depth_numerical, data = df),
+  lmer(pH ~ Organic + Conventional + depth_numerical + (1|plot), data = df),
+  lmer(Al_ox ~ pH + Organic + Conventional + depth_numerical + (1|plot), data = df),
+  lmer(Fe_ox ~ pH + Organic + Conventional + (1|plot), data = df),
+  lmer(log_root ~ Organic + Conventional + depth_numerical + (1|plot), data = df),
   lm(CAZyme_PCoA1 ~ depth_numerical + pH + Fe_ox, data = df),
   lm(C ~ CAZyme_PCoA1 + depth_numerical + Al_ox + log_root, data = df),
-  data = df)
+  data = df
+)
 
 summary(m.sem)
+
+```
+
+Diagnostics
+
+```{r}
+# Access each model by index
+model1 <- m.sem[[1]]  # pH
+model2 <- m.sem[[2]]  # Al_ox
+model3 <- m.sem[[3]]  # Fe_ox
+model4 <- m.sem[[4]]  # log_root
+model5 <- m.sem[[5]]  # CAZyme_PCoA1
+model6 <- m.sem[[6]]  # C
+
+# Or create a list
+models <- list(
+  pH = m.sem[[1]],
+  Al_ox = m.sem[[2]],
+  Fe_ox = m.sem[[3]],
+  log_root = m.sem[[4]],
+  CAZyme_PCoA1 = m.sem[[5]],
+  C = m.sem[[6]]
+)
+
+# Check class of each
+sapply(models, class)
 ```
 
 
-
-
-## 3.2.Check for Multicollinearity:
-
-
-Different predictors across models: Each equation in your SEM has different predictor sets, so VIF should be calculated separately for each model that has multiple predictors.!!!!!!!!!!
-
-
-
 ```{r}
-# Quick check
+library(lmtest)
+library(performance)
 library(car)
-model1 <- lm(C ~ pH + `Fe-ox` + `Al-ox` + CAZyme_PCoA1 + `Root biomass`, data = df)
-vif(model1)
+
+# Define model names
+model_names <- c("pH", "Al_ox", "Fe_ox", "log_root", "CAZyme_PCoA1", "C")
+
+for(i in 1:6) {
+  model <- m.sem[[i]]
+  model_name <- model_names[i]
+  
+  cat("\n", paste(rep("=", 70), collapse = ""), "\n")
+  cat("MODEL:", model_name, "\n")
+  cat(paste(rep("=", 70), collapse = ""), "\n")
+  
+  # Summary
+  print(summary(model))
+  
+  # Residuals
+  resid <- residuals(model)
+  
+  # Normality (Shapiro-Wilk)
+  shapiro_p <- shapiro.test(resid)$p.value
+  cat("\nShapiro-Wilk p =", round(shapiro_p, 4),
+      ifelse(shapiro_p > 0.05, " ✓ normal", " ⚠ non-normal"))
+  
+  # Autocorrelation (Durbin-Watson)
+  if(length(resid) > 3) {
+    dw_p <- dwtest(resid ~ 1)$p.value
+    cat("\nDurbin-Watson p =", round(dw_p, 4),
+        ifelse(dw_p > 0.05, " ✓ no autocorrelation", " ⚠ autocorrelation"))
+  }
+  
+  # R²
+  if(inherits(model, "lmerMod")) {
+    r2 <- r2_nakagawa(model)
+    cat("\nMarginal R² =", round(r2$R2_marginal, 4))
+    cat("\nConditional R² =", round(r2$R2_conditional, 4))
+    
+    # Random effect variance
+    vc <- VarCorr(model)
+    plot_var <- as.numeric(vc$plot[1,1])
+    cat("\nPlot variance =", round(plot_var, 6))
+  } else {
+    cat("\nR² =", round(summary(model)$r.squared, 4))
+  }
+  
+  # Influential points (for lm only)
+  if(inherits(model, "lm") & !inherits(model, "lmerMod")) {
+    cooks <- cooks.distance(model)
+    threshold <- 4 / length(cooks)
+    n_inf <- sum(cooks > threshold)
+    cat("\nInfluential points (Cook's D >", round(threshold, 3), "):", n_inf)
+    if(n_inf > 0) {
+      cat(" -", paste(which(cooks > threshold), collapse = ", "))
+    }
+  }
+  
+  cat("\n")
+}
 ```
 
-all VIFs below 10 (and mostly below 5), ok
-
-
-```{r}
-# Check each model with multiple predictors
-vif(lm(pH ~ Organic + Conventional + `Depth (numerical)`, data = df))
-vif(lm(`Al-ox` ~ pH + Organic + Conventional + `Depth (numerical)`, data = df))
-vif(lm(`Fe-ox` ~ pH + Organic + Conventional, data = df))
-vif(lm(`Root biomass` ~ Organic + Conventional + `Depth (numerical)`, data = df))
-vif(lm(CAZyme_PCoA1 ~ `Depth (numerical)` + pH + `Fe-ox`, data = df))
-vif(lm(C ~ CAZyme_PCoA1 + `Depth (numerical)` + `Al-ox` + `Root biomass`, data = df))
-```
-
-all below 10 (most below 5) here as well
-
-
-
-
-## 3.3. Consider Adding Correlated Errors (no need)
-
-Since we have good fit, this isn't necessary, but we could check:
-
-```{r}
-# If we wanted to allow correlated errors between certain variables
-colnames(df)[which(names(df) == "Al-ox")] <- "Al_ox"
-colnames(df)[which(names(df) == "Fe-ox")] <- "Fe_ox"
-colnames(df)[which(names(df) == "Root biomass")] <- "log_root"
-colnames(df)[which(names(df) == "Depth (numerical)")] <- "depth_numerical"
-
-m.sem2 <- psem(
-  lm(pH ~ Organic + Conventional + depth_numerical, data = df),
-  lm(Al_ox ~ pH + Organic + Conventional + depth_numerical, data = df),
-  lm(Fe_ox ~ pH + Organic + Conventional, data = df),
-  lm(log_root ~ Organic + Conventional + depth_numerical, data = df),
-  lm(CAZyme_PCoA1 ~ depth_numerical + pH + Fe_ox, data = df),
-  lm(C ~ CAZyme_PCoA1 + depth_numerical + Al_ox + log_root, data = df),
-  # Allow correlation between residuals
-  pH %~~% Fe_ox,
-  data = df)
-
-summary(m.sem2)
-```
-
-
-
-Perfect! Adding the correlated error didn't change the model - it's not significant (p = 0.2957) and AIC stayed the same. This confirms the original model (without correlated errors) is optimal.
-
-
-## 3.4. Effects graph
-
-
-
-lm(pH ~ Organic + Conventional + depth_numerical)
-
-lm(Al_ox ~ pH + Organic + Conventional + depth_numerical)
-
-lm(Fe_ox ~ pH + Organic + Conventional)
-
-lm(log_root ~ Organic + Conventional + depth_numerical)
-
-lm(CAZyme_PCoA1 ~ depth_numerical + pH + Fe_ox)
-
-lm(C ~ CAZyme_PCoA1 + depth_numerical + Al_ox + log_root)
-
-
-So direct paths to C are:
-
-CAZyme_PCoA1 → C
-depth → C
-Al_ox → C
-log_root → C
 
 
 #### 3.4.1. Extract standardized coefficients
@@ -597,7 +590,7 @@ get_coef("C","CAZyme_PCoA1")
 
 ```{r}
 direct_effects <- std_coefs %>%
-  filter(Response=="C") %>%
+  dplyr::filter(Response=="C") %>%
   dplyr::select(Predictor,
          Direct = Std.Estimate)
 ```
@@ -649,8 +642,220 @@ Total = Direct + Indirect
 
 
 
+#### 3.4.6. Plot total effects
 
-#### 3.4.6. Plot Stacked diret and indirect effects
+
+
+
+```{r}
+library(ggplot2)
+
+effects_all %>%
+
+mutate(
+color = ifelse(Total>0,"Positive","Negative")
+) %>%
+
+ggplot(aes(
+x=reorder(Predictor,Total),
+y=Total,
+fill=color
+))+
+
+geom_bar(stat="identity")+
+
+coord_flip()+
+
+scale_fill_manual(
+values=c(
+"Positive"="#0070C0",
+"Negative"="#C00000"
+)
+)+
+
+geom_hline(
+yintercept=0,
+linetype="dashed"
+)+
+
+labs(
+y="Total standardized effects",
+x=NULL
+)+
+
+theme_minimal()+
+
+guides(fill="none")+
+
+# THIS fixes the labels
+scale_x_discrete(labels = function(x) {
+  x[x == "Fe_ox"] <- "Fe-ox"
+  x[x == "Al_ox"] <- "Al-ox"
+  x[x == "depth_numerical"] <- "Soil\ndepth"
+  x[x == "log_root"] <- "Root\nbiomass"
+  x[x == "CAZyme_PCoA1"] <- "CAZyme\nPCoA1"
+  x[x == "Organic"] <- "Organic\ntreatment"
+  x[x == "Conventional"] <- "Conventional\ntreatment"
+  x
+})
+```
+
+
+#### 3.4.7. Plot direct effects
+
+```{r}
+library(ggplot2)
+library(dplyr)
+
+custom_labels <- c(
+
+"Organic" = "Organic\ntreatment",
+"Conventional" = "Conventional\ntreatment",
+"depth_numerical" = "Soil\ndepth",
+
+"pH" = "pH",
+
+"Fe_ox" = "Fe-ox",
+"Al_ox" = "Al-ox",
+
+"CAZyme_PCoA1" = "CAZyme\nPCoA1",
+
+"log_root" = "Root\nbiomass"
+
+)
+
+plot_direct <- direct_effects %>%
+
+mutate(
+
+Predictor_label = custom_labels[Predictor],
+
+color = ifelse(
+Direct >= 0,
+"Positive",
+"Negative"
+)
+
+) %>%
+
+ggplot(
+
+aes(
+x = reorder(Predictor_label, Direct),
+y = Direct,
+fill = color
+)
+
+) +
+
+geom_bar(stat = "identity") +
+
+coord_flip() +
+
+scale_fill_manual(
+values = c(
+"Positive" = "#0070C0",
+"Negative" = "#C00000"
+)
+) +
+
+geom_hline(
+yintercept = 0,
+linetype = "dashed"
+) +
+
+labs(
+y = "Direct standardized effects",
+x = NULL
+) +
+
+theme_minimal() +
+
+theme(
+
+plot.background = element_rect(fill = "transparent", color = NA),
+panel.background = element_rect(fill = "transparent", color = NA),
+legend.background = element_rect(fill = "transparent", color = NA),
+
+axis.text.x = element_text(size = 16),
+axis.text.y = element_text(size = 16),
+
+axis.title.x = element_text(size = 20),
+axis.title.y = element_text(size = 20)
+
+) +
+
+guides(fill = "none") +
+
+scale_y_continuous(
+limits = c(-0.3, 0.4),
+breaks = seq(-0.3, 0.4, by = 0.1),
+labels = function(x) sprintf("%.1f", x)
+)
+
+plot_direct
+
+```
+
+
+#### 3.4.8. lot indirect effects
+
+```{r}
+plot_indirect <- indirect_df %>%
+
+mutate(
+color = ifelse(Indirect>0,"Positive","Negative")
+) %>%
+
+ggplot(aes(
+x=reorder(Predictor,Indirect),
+y=Indirect,
+fill=color
+))+
+
+geom_bar(stat="identity")+
+
+coord_flip()+
+
+scale_fill_manual(
+values=c(
+"Positive"="#0070C0",
+"Negative"="#C00000"
+)
+)+
+
+geom_hline(
+yintercept=0,
+linetype="dashed"
+)+
+
+labs(
+y="Indirect standardized effects",
+x=NULL
+)+
+
+theme_minimal()+
+
+guides(fill="none")+
+
+# THIS is the only added part
+scale_x_discrete(labels = c(
+  "Organic" = "Organic\ntreatment",
+  "Conventional" = "Conventional\ntreatment",
+  "depth_numerical" = "Soil\ndepth",
+  "pH" = "pH",
+  "Fe_ox" = "Fe-ox",
+  "Al_ox" = "Al-ox",
+  "CAZyme_PCoA1" = "CAZyme\nPCoA1",
+  "log_root" = "Root\nbiomass"
+))
+
+plot_indirect
+```
+
+
+
+#### 3.4.9. Stacked diret and indirect
 
 ```{r}
 library(ggplot2)
@@ -753,7 +958,7 @@ theme(
 ) +
   guides(fill = guide_legend(nrow = 2)) +
   
-# original label fixes
+# Your original label fixes
 scale_x_discrete(labels = function(x) {
   x[x == "Fe_ox"] <- "Fe-ox"
   x[x == "Al_ox"] <- "Al-ox"
@@ -767,6 +972,8 @@ scale_x_discrete(labels = function(x) {
 
 plot_total
 ```
+
+
 
 # 4. Figures
 

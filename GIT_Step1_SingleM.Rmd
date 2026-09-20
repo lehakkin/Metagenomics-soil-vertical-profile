@@ -163,291 +163,205 @@ print(rich)
 
 # 1.4. Test alpha-diversity
 
+GENERALIZED MIXED MODEL
+
 Let's focus on Chao1
 
-## 1.4.1. between management types in all soil layers
 
 
-Change depth and richness measure accordingly
+I dont' need to use or I shouldn't use poisson, which is meant for count data, or nbinom2 as Chao1 values are no longer integer values!
 
-Test these:
-- chao1
-- shannon
+
 
 
 ```{r}
-library("multcomp")
-library(car)
+meta <- subset(meta, sample_type!="forest")
 
-means_and_ses <- list()
+meta$treatment <- factor(meta$sample_type, 
+                            levels = c("meadow", "organic", "conventional"))
 
-meta$depth <- as.factor(meta$depth)
-rich <-c("chao1", "shannon")
+levels(meta$treatment)
 
-for (i in rich) {
-  for (j in levels(meta$depth)) {
-    df <- filter(meta, depth==j)
-    
-     print(i)
-     print(j)
-     # Levene's test for homogeneity of variance
-    result <- leveneTest(df[[i]] ~ sample_type, data = df)
-    print(result)
-     
-    # Kruskal-Wallis test
-    k <- kruskal.test(df[[i]] ~ sample_type, data = df)
-    print(k)
-    
-    # Pairwise Wilcoxon test
-    w <- pairwise.wilcox.test(df[[i]], df$sample_type, p.adjust.method = "BH")
-    print(w)
-    
-     # ANOVA
-    res.aov <- aov(df[[i]] ~ sample_type, data = df)
-    aov_summary <- summary(res.aov)
-    print(aov_summary)
-    
-    # Tukey's HSD test
-    tukey <- TukeyHSD(res.aov)
-    print(tukey)
-    
-    # Group by and summarize
-    mean_and_se <- df %>%
-      group_by(sample_type) %>%
-      summarise(mean = mean(!!sym(i), na.rm = TRUE), se = sd(!!sym(i), na.rm = TRUE) / sqrt(n()))
-  
-    # Store the result in the list with a descriptive name
-    result_name <- paste("depth", j, "diversity", i, sep = "_")
-    means_and_ses[[result_name]] <- mean_and_se
-    
-  }
-}
+meta$depth <- factor(meta$depth, 
+                            levels = c("0...10", "10...20", "20...30", "30...40", "40..."))
 
-# Combine list into a single dataframe
-combined_df <- bind_rows(lapply(names(means_and_ses), function(name) {
-  df <- means_and_ses[[name]]
-  df$result_name <- name
-  return(df)
-}), .id = "id")
+levels(meta$depth)
 
 
 ```
 
+# 1. Data distribution
+
+```{r}
+# Basic density plot in ggplot2
+ggplot(meta, aes(x = chao1)) +
+  geom_density()
+```
 
 
---> All where homogenous so I can just do the anova and tukey tests
-
-Lets run again to get a results table with CLD characters:
 
 
 ```{r}
+shapiro.test(meta$chao1)
+```
+
+
+
+
+
+# 2. GLM
+
+
+
+
+```{r}
+mx <- glmmTMB(chao1 ~ depth * treatment + (1|plot), 
+              data = meta, 
+              tweedie(link = "log"),
+              dispformula = ~ depth,  # Variance varies by depth!
+              control = glmmTMBControl(
+                optCtrl = list(iter.max = 1000, eval.max = 1000)
+              ))
+
+# 2. Check model diagnostics
+summary(mx)
+Anova(mx, type = "II", test = "Chisq")  # Type II tests
+
+# 3. Validate residuals
+sim_res <- simulateResiduals(mx, n = 250)
+plot(sim_res)
+testResiduals(sim_res)
+
+# 1. Test if you need it:
+mx0 <- glmmTMB(chao1 ~ depth * treatment + (1|plot), 
+              data = meta, 
+              tweedie(link = "log"),
+              control = glmmTMBControl(
+                optCtrl = list(iter.max = 1000, eval.max = 1000)
+              ))
+
+# Likelihood ratio test
+anova(mx0, mx)  # If p < 0.05, include dispformula
+```
+
+
+# 3. Final model: m1
+
+
+```{r}
+# 1. Fit model (with singular fit - this is fine!)
+m1 <- glmmTMB(chao1 ~ depth * treatment + (1|plot), 
+              data = meta, 
+              tweedie(link = "log"),
+              control = glmmTMBControl(
+                optCtrl = list(iter.max = 1000, eval.max = 1000)
+              ))
+
+# 2. Check model diagnostics
+summary(m1)
+Anova(m1, type = "II", test = "Chisq")  # Type II tests
+
+##########################
+logLik(m1)
+##########################
+# 1. Get predictions using ONLY the fixed effects (depth * treatment)
+# re.form = NA drops the random effects from the prediction
+fixed_preds <- predict(m1, type = "response", re.form = NA)
+
+# 2. Get predictions using BOTH fixed and random effects
+full_preds <- predict(m1, type = "response")
+
+# 3. Get your actual raw response data from the model
+raw_data <- m1$frame$chao1
+
+# 4. Compute manual R2 values
+R2_marginal_manual    <- var(fixed_preds) / var(raw_data)
+R2_conditional_manual <- var(full_preds) / var(raw_data)
+
+# Print results
+print(R2_marginal_manual)
+print(R2_conditional_manual)
+
+#########################
+
+# 3. Validate residuals
+sim_res <- simulateResiduals(m1, n = 250)
+plot(sim_res)
+testResiduals(sim_res)
+
+
+##########################
+
+# Force emmeans to always calculate back-transformed real-scale proportions (0 to 1)
+# while performing pairwise tests safely on the internal logit scale.
+
+library(emmeans)
 library(multcomp)
-library(lsmeans)
 
-# Initialize an empty dataframe to store results
-results_df <- data.frame(depth = character(),
-                         sample_type = character(),
-                         diversity = character(),
-                         ANOVA_p = numeric(),
-                         mean_se_cld = character(),
-                         stringsAsFactors = FALSE)
+# =========================================================================
+# 1. INTERACTION POST-HOC 
+# =========================================================================
 
-# Get unique depth levels
-depths <- unique(meta$depth)
-
-# Loop through each depth
-for (d in depths) {
-  # Subset data for current depth
-  depth_data <- meta[meta$depth == d, ]
-  
-  # Loop through each diversity measure
-  for (div in c("chao1", "shannon")) {
-    # Perform ANOVA
-    formula <- as.formula(paste(div, "~ sample_type"))
-    res.aov <- aov(formula, data = depth_data)
-    
-    # Get ANOVA p-value
-    anova_p <- summary(res.aov)[[1]]$"Pr(>F)"[1]
-    
-    # Perform Tukey HSD if ANOVA is significant (p < 0.05)
-    if (anova_p < 0.05) {
-      tukey <- glht(res.aov, linfct = mcp(sample_type = "Tukey"))
-      cld_result <- cld(tukey)
-      letters <- cld_result$mcletters$Letters
-    } else {
-      # If not significant, all groups get the same letter
-      groups <- unique(depth_data$sample_type)
-      letters <- setNames(rep("a", length(groups)), groups)
-    }
-    
-    # Calculate mean and SE for each sample_type
-    means <- tapply(depth_data[[div]], depth_data$sample_type, mean, na.rm = TRUE)
-    ses <- tapply(depth_data[[div]], depth_data$sample_type, 
-                 function(x) sd(x, na.rm = TRUE)/sqrt(length(na.omit(x))))
-    
-    # Create mean_se_cld strings
-    mean_se_cld <- paste0(round(means, 1), "±", round(ses, 1), letters[names(means)])
-    
-    # Create temporary dataframe for current results
-    temp_df <- data.frame(
-      depth = d,
-      sample_type = names(means),
-      diversity = div,
-      ANOVA_p = anova_p,
-      mean_se_cld = mean_se_cld,
-      stringsAsFactors = FALSE
-    )
-    
-    # Append to results dataframe
-    results_df <- rbind(results_df, temp_df)
-  }
-}
-
-# Reset row names
-rownames(results_df) <- NULL
-```
+# Option A: Comparing treatments within each specific depth
+emm_inter_A <- emmeans(m1, ~ treatment | depth, type = "response")
+# Get Letters:
+cld_interaction_A <- as.data.frame(cld(emm_inter_A, adjust = "tukey", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_interaction_A <- as.data.frame(contrast(emm_inter_A, method = "pairwise", adjust = "tukey"))
 
 
-
-No differences between treatments within any of the soil layers!
-
-
-
-## 1.4.2. between soil layers within all treatments
-
-
-```{r}
-library("multcomp")
-library(car)
+# Option B: Comparing depths within each specific treatment
+emm_inter_B <- emmeans(m1, ~ depth | treatment, type = "response")
+# Get Letters:
+cld_interaction_B <- as.data.frame(cld(emm_inter_B, adjust = "tukey", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_interaction_B <- as.data.frame(contrast(emm_inter_B, method = "pairwise", adjust = "tukey"))
 
 
-means_and_ses <- list()
+# =========================================================================
+# 2. DEPTH MAIN EFFECT POST-HOC 
+# =========================================================================
 
-meta$sample_type <- as.factor(meta$sample_type)
-rich <-c("chao1", "shannon")
+emm_depth_main <- emmeans(m1, ~ depth, type = "response")
+# Get Letters:
+cld_depth_main <- as.data.frame(cld(emm_depth_main, adjust = "tukey", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_depth_main <- as.data.frame(contrast(emm_depth_main, method = "pairwise", adjust = "tukey"))
 
-for (i in rich) {
-  for (j in levels(meta$sample_type)) {
-    df <- filter(meta, sample_type==j)
-    
-     print(i)
-     print(j)
-     # Levene's test for homogeneity of variance
-    result <- leveneTest(df[[i]] ~ depth, data = df)
-    print(result)
-     
-    # Kruskal-Wallis test
-    k <- kruskal.test(df[[i]] ~ depth, data = df)
-    print(k)
-    
-    # Pairwise Wilcoxon test
-    w <- pairwise.wilcox.test(df[[i]], df$depth, p.adjust.method = "BH")
-    print(w)
-    
-     # ANOVA
-    res.aov <- aov(df[[i]] ~ depth, data = df)
-    aov_summary <- summary(res.aov)
-    print(aov_summary)
-    
-    # Tukey's HSD test
-    tukey <- TukeyHSD(res.aov)
-    print(tukey)
-    
-    # Group by and summarize
-    mean_and_se <- df %>%
-      group_by(depth) %>%
-      summarise(mean = mean(!!sym(i), na.rm = TRUE), se = sd(!!sym(i), na.rm = TRUE) / sqrt(n()))
-  
-    # Store the result in the list with a descriptive name
-    result_name <- paste("sample_type", j, "diversity", i, sep = "_")
-    means_and_ses[[result_name]] <- mean_and_se
-    
-  }
-}
 
-# Combine list into a single dataframe
-combined_df <- bind_rows(lapply(names(means_and_ses), function(name) {
-  df <- means_and_ses[[name]]
-  df$result_name <- name
-  return(df)
-}), .id = "id")
+# =========================================================================
+# 3. TREATMENT MAIN EFFECT POST-HOC 
+# =========================================================================
+
+emm_treatment_main <- emmeans(m1, ~ treatment, type = "response")
+# Get Letters:
+cld_treatment_main <- as.data.frame(cld(emm_treatment_main, adjust = "tukey", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_treatment_main <- as.data.frame(contrast(emm_treatment_main, method = "pairwise", adjust = "tukey"))
+
+
+# =========================================================================
+# 4. Print all outputs to your console
+# =========================================================================
+print("--- Interaction: Treatment within Depth (LETTERS & P-VALUES) ---")
+print(cld_interaction_A)
+print(p_interaction_A)
+
+print("--- Interaction: Depth within Treatment (LETTERS & P-VALUES) ---")
+print(cld_interaction_B)
+print(p_interaction_B)
+
+print("--- Main Effect: Depth (LETTERS & P-VALUES) ---")
+print(cld_depth_main)
+print(p_depth_main)
+
+print("--- Main Effect: Treatment (LETTERS & P-VALUES) ---")
+print(cld_treatment_main)
+print(p_treatment_main)
 
 
 ```
 
-
-
---> All were homogenuous so I can just do the anova and tukey tests
-
-Lets run again:
-
-
-```{r}
-library(multcomp)
-library(lsmeans)
-
-# Initialize an empty dataframe to store results
-results_df <- data.frame(sample_type = character(),
-                         depth = character(),
-                         diversity = character(),
-                         ANOVA_p = numeric(),
-                         mean_se_cld = character(),
-                         stringsAsFactors = FALSE)
-
-# Get unique sample_type levels
-sample_types <- unique(meta$sample_type)
-
-# Loop through each sample_type
-for (d in sample_types) {
-  # Subset data for current sample_type
-  sample_type_data <- meta[meta$sample_type == d, ]
-  
-  # Loop through each diversity measure
-  for (div in c("chao1", "shannon")) {
-    # Perform ANOVA
-    formula <- as.formula(paste(div, "~ depth"))
-    res.aov <- aov(formula, data = sample_type_data)
-    
-    # Get ANOVA p-value
-    anova_p <- summary(res.aov)[[1]]$"Pr(>F)"[1]
-    
-    # Perform Tukey HSD if ANOVA is significant (p < 0.05)
-    if (anova_p < 0.05) {
-      tukey <- glht(res.aov, linfct = mcp(depth = "Tukey"))
-      cld_result <- cld(tukey)
-      letters <- cld_result$mcletters$Letters
-    } else {
-      # If not significant, all groups get the same letter
-      groups <- unique(sample_type_data$depth)
-      letters <- setNames(rep("a", length(groups)), groups)
-    }
-    
-    # Calculate mean and SE for each depth
-    means <- tapply(sample_type_data[[div]], sample_type_data$depth, mean, na.rm = TRUE)
-    ses <- tapply(sample_type_data[[div]], sample_type_data$depth, 
-                 function(x) sd(x, na.rm = TRUE)/sqrt(length(na.omit(x))))
-    
-    # Create mean_se_cld strings
-    mean_se_cld <- paste0(round(means, 1), "±", round(ses, 1), letters[names(means)])
-    
-    # Create temporary dataframe for current results
-    temp_df <- data.frame(
-      sample_type = d,
-      depth = names(means),
-      diversity = div,
-      ANOVA_p = anova_p,
-      mean_se_cld = mean_se_cld,
-      stringsAsFactors = FALSE
-    )
-    
-    # Append to results dataframe
-    results_df <- rbind(results_df, temp_df)
-  }
-}
-
-# Reset row names
-rownames(results_df) <- NULL
-```
 
 
 
@@ -645,6 +559,27 @@ p2
 ## 2.2. PERMANOVA
 
 
+No forest!
+
+
+```{r}
+
+# subset samples
+ps_RA <- subset_samples(ps_RA, sample_type != "forest")
+
+meta <- subset(meta, sample_type != "forest")
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_RA),
+              MARGIN = ifelse(taxa_are_rows(ps_RA), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_RA = prune_taxa((prev0 > 0), ps_RA)
+ps_RA
+```
+
 
 ### 2.2.1. Calculate Bray-Curtis (dis)similarities
 
@@ -703,36 +638,6 @@ adonis2(formula = ps_RA_bray~ sample_type, data = meta, permutations = 9999, met
 
 Significant
 
-Without forest
-
-```{r}
-# subset samples
-ps_x <- subset_samples(ps_RA, sample_type != "forest")
-meta_subset <- meta(ps_x)
-
-
-# You have only submitted samples, not OTUs. Define prevalence of each taxa
-# (in how many samples did each taxa appear at least once)
-prev0 = apply(X = otu_table(ps_x),
-              MARGIN = ifelse(taxa_are_rows(ps_x), yes = 1, no = 2),
-              FUN = function(x){sum(x > 0)})
-
-# Execute prevalence filter, using `prune_taxa()` function
-ps_x = prune_taxa((prev0 > 0), ps_x)
-ps_x
-
-b <- phyloseq::distance(ps_x, method = "bray")
-
-
-set.seed(777)
-
-final <- adonis2(formula = b ~ sample_type, data = meta_subset, permutations = 9999, method = "bray", by = "margin", strata = meta_subset$depth)
-final
-
-```
-
-Significant also without forest
-
 
 
 
@@ -760,35 +665,6 @@ final
 Interaction is significant
 
 
-
-
-
-
-
-
-## 2.3. Add PERMANOVA results to PCoA
-
-
-
-
-
-
-```{r}
-library(ggpubr) ## for getting stat_regline_equation
-library("ggpmisc")
-
-rpsB <- p2 + 
-  annotate(
-    geom = "text",
-    x = -0.27,
-    y = 0.17,
-    label = "PERMANOVA \nSoil layer:Treatment: R²=0.11; p<0.001 \nSoil layer: R²=0.10; p<0.001 \nTreatment R² = 0.04; p<0.001 \nModel R² = 0.25",
-    hjust = 0,
-    size = 4  # Increase this value until text matches your desired size (default is 3.88)
-  )
-
-rpsB
-```
 
 
 

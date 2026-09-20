@@ -611,6 +611,26 @@ ps_x
 ```
 
 
+No forest!
+
+```{r}
+#To remove those from your phyloseq object
+ps_x <- subset_samples(ps_x, sample_type!="forest")
+#This will return a ps object with the samples removed
+ps_x
+
+# You have only submitted samples, not OTUs. Define prevalence of each taxa
+# (in how many samples did each taxa appear at least once)
+prev0 = apply(X = otu_table(ps_x),
+              MARGIN = ifelse(taxa_are_rows(ps_x), yes = 1, no = 2),
+              FUN = function(x){sum(x > 0)})
+
+# Execute prevalence filter, using `prune_taxa()` function
+ps_x = prune_taxa((prev0 > 0), ps_x)
+ps_x
+
+```
+
 Calculate Bray-Curtis (dis)similarities
 
 ```{r}
@@ -675,7 +695,7 @@ Depth
 adonis2(formula = ps_RA_bray~ depth, data = meta, permutations = 999, method = "bray", by = "margin", strata = meta$sample_type)
 ```
 
-With P value = 1e-04, the soil layer is significant and R2 value indicated 29% variance explanation
+
 
 
 ## 5.2. Final PERMANOVA
@@ -687,27 +707,6 @@ final <- adonis2(formula = ps_RA_bray ~depth * sample_type, data = meta, permuta
 final
 ```
 
-
-# 6. Add PERMANOVA results to PCoA
-
-
-
-```{r}
-library(ggpubr) ## for getting stat_regline_equation
-library("ggpmisc")
-
-p <- p1 + 
-  annotate(
-    geom = "text",
-    x = -0.25,
-    y = 0.28,
-    label = "PERMANOVA\nSoil layer:Treatment: R²=0.09; p=0.042 \nSoil layer: R²=0.29; p<0.001\nTreatment: R²=0.05; p<0.001\nModel R²=0.42",
-    hjust = 0,
-    size = 4  # Increase this value until text matches your desired size (default is 3.88)
-  )
-
-p
-```
 
 
 
@@ -904,7 +903,7 @@ metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
 
 
 
-## 7.2. CAZyme classes
+## 7.2. CAZyme classes: GLMM
 
 
 ```{r}
@@ -918,159 +917,1550 @@ tax <- as.data.frame(tax_table(ps_x))
 ```
 
 
-### 7.2.1. With meadow
-
-
-
-```{r}
-#To remove those from your phyloseq object
-ps_x <- subset_samples(ps_x, sample_type!="forest")
-#This will return a ps object with the samples removed
-ps_x
-
-# You have only submitted samples, not OTUs. Define prevalence of each taxa
-# (in how many samples did each taxa appear at least once)
-prev0 = apply(X = otu_table(ps_x),
-              MARGIN = ifelse(taxa_are_rows(ps_x), yes = 1, no = 2),
-              FUN = function(x){sum(x > 0)})
-
-# Execute prevalence filter, using `prune_taxa()` function
-ps_x = prune_taxa((prev0 > 0), ps_x)
-ps_x
-
-```
-
-
-```{r}
-# Run MaAsLin2
-library(Maaslin2)
-
-# Make input_data
-## input_data = dataframe where named gene_data where rows = samples and columns = genes
-## input_metadata = dataframe here named metadata)
-
-setwd('C:\\Users\\lehakkin\\RStudio_computer\\GENE_MaAsLin2\\CAZyme_Family')
-
-## get the otu table
-gene_data <- as.data.frame(otu_table(ps_x))
-gene_data <- as.data.frame(t(gene_data))
-
-metadata <- meta(ps_x)
-
-metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
-
-metadata$Layer[metadata$Layer=="40-"] <- "40-80"
-
-
-metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
-metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
-metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
-metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
-metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
-
-metadata$Layer <- as.factor(metadata$Layer)
-levels(metadata$Layer)
-
-metadata$Treatment <- metadata$sample_type
-metadata$Treatment <- as.character(metadata$Treatment)
-
-metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
-metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
-metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
-metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
-
-#fit_data <- Maaslin2(
-#  input_data = gene_data,
-#  input_metadata = metadata,
-#  output = "Treatment_Layer_With_Meadow",
-#  fixed_effects = c('Layer', 'Treatment'), # my grouping variable(s)
-#  normalization = "NONE",          # Use CLR for relative abundances
-#  transform = "NONE",             # No extra transform (data is already proportional)
-#  analysis_method = "CPLM", #DEFAULT:
-#  correction = "BH",               # Benjamini-Hochberg FDR correction
-#  plot_heatmap = TRUE,
-#  reference = 'Treatment,Meadow')
-
-```
-
-
-
-
-### 7.2.2. Without meadow
-
+Remove forest
 
 
 ```{r}
 #To remove those from your phyloseq object
-ps_x <- subset_samples(ps_x, sample_type!="forest" & sample_type!="meadow")
+ps_y <- subset_samples(ps_x, sample_type!="forest")
 #This will return a ps object with the samples removed
-ps_x
+ps_y
 
 # You have only submitted samples, not OTUs. Define prevalence of each taxa
 # (in how many samples did each taxa appear at least once)
-prev0 = apply(X = otu_table(ps_x),
-              MARGIN = ifelse(taxa_are_rows(ps_x), yes = 1, no = 2),
+prev0 = apply(X = otu_table(ps_y),
+              MARGIN = ifelse(taxa_are_rows(ps_y), yes = 1, no = 2),
               FUN = function(x){sum(x > 0)})
 
 # Execute prevalence filter, using `prune_taxa()` function
-ps_x = prune_taxa((prev0 > 0), ps_x)
-ps_x
+ps_y = prune_taxa((prev0 > 0), ps_y)
+ps_y
 
+```
+
+
+
+
+
+```{r}
+#create data table
+FG_df <-  psmelt(ps_y)
+
+FG_df$treatment <- factor(FG_df$sample_type, 
+                            levels = c("meadow", "organic", "conventional"))
+
+levels(FG_df$treatment)
+
+FG_df$depth <- factor(FG_df$depth, 
+                            levels = c("0...10", "10...20", "20...30", "30...40", "40..."))
+
+levels(FG_df$depth)
+
+FG_df$OTU <- as.factor(FG_df$OTU)
+
+
+```
+
+
+
+# A) AA
+
+```{r}
+levels(FG_df$OTU)
 ```
 
 
 ```{r}
-# Run MaAsLin2
-library(Maaslin2)
+taxa <- "AA"
 
-# Make input_data
-## input_data = dataframe where named gene_data where rows = samples and columns = genes
-## input_metadata = dataframe here named metadata)
-
-setwd('C:\\Users\\lehakkin\\RStudio_computer\\GENE_MaAsLin2\\CAZyme_Family')
-
-## get the otu table
-gene_data <- as.data.frame(otu_table(ps_x))
-gene_data <- as.data.frame(t(gene_data))
-
-metadata <- meta(ps_x)
-
-metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
-
-metadata$Layer[metadata$Layer=="40-"] <- "40-80"
+# Construct a data.frame with the selected
+# taxonomic group and grouping
+# relative
+df2 <- filter(FG_df, OTU == taxa)
+```
 
 
-metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
-metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
-metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
-metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
-metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
 
-metadata$Layer <- as.factor(metadata$Layer)
-levels(metadata$Layer)
 
-metadata$Treatment <- metadata$sample_type
-metadata$Treatment <- as.character(metadata$Treatment)
+# 1. Data distribution
 
-metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
-metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
-metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
-metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
+```{r}
+# Basic density plot in ggplot2
+ggplot(df2, aes(x = Abundance)) +
+  geom_density()
+```
 
-#fit_data <- Maaslin2(
-#  input_data = gene_data,
-#  input_metadata = metadata,
-#  output = "Treatment_Layer_WO_Meadow",
-#  fixed_effects = c('Layer', 'Treatment'), # my grouping variable(s)
-#  normalization = "NONE",          # Use CLR for relative abundances
-#  transform = "NONE",             # No extra transform (data is already proportional)
-#  analysis_method = "CPLM", #DEFAULT:
-#  correction = "BH",               # Benjamini-Hochberg FDR correction
-#  plot_heatmap = TRUE,
-#  reference = 'Treatment,Conventional')
+
+
+
+```{r}
+shapiro.test(df2$Abundance)
+```
+
+
+
+
+--> normal but longer tails
+
+
+
+```{r}
+fig <- df2 %>%
+  group_by(treatment, depth_numerical) %>%
+  summarise(
+    mean = mean(Abundance, na.rm = TRUE),
+    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  ungroup() %>%
+  ggplot(aes(
+    y = mean,
+    x = depth_numerical,
+    color = treatment
+  )) +
+  geom_line(position = position_dodge(1.2)) +
+  geom_point(size = 2, position = position_dodge(1.2)) +
+  geom_errorbar(
+    aes(ymin = mean - se, ymax = mean + se),
+    width = 0.3,
+    position = position_dodge(1.2),
+    linetype = "solid",
+    alpha = 0.5
+  ) +
+  coord_flip() +
+  scale_x_reverse() +
+  scale_colour_manual(values = MyPalette) +
+  labs(
+    x = "Soil layer",
+    y = "Proportion",
+    color = "Treatment"
+  ) +
+  theme_cowplot() +
+  theme(
+    axis.text = element_text(size = 18),
+    axis.title = element_text(size = 22, face = "bold"),
+    legend.text = element_text(size = 22),
+    legend.title = element_text(size = 22),
+    plot.title = element_text(size = 22, hjust = 0.5),
+    panel.border = element_rect(colour = "black", fill = NA, size = 0.5),
+    strip.text = element_text(size = 22, face = "bold")
+  ) +
+  scale_x_reverse(
+    breaks = c(60, 35, 25, 15, 5),
+    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
+  ) + theme(legend.title=element_blank())
+
+print(fig)
+```
+
+
+
+# 2. GLMM 
+
+
+
+
+```{r}
+mx <- glmmTMB(Abundance ~ depth * treatment + (1|plot), 
+              data = df2, 
+              beta_family(link = "logit"),
+              dispformula = ~ depth,  # Variance varies by depth!
+              control = glmmTMBControl(
+                optCtrl = list(iter.max = 1000, eval.max = 1000)
+              ))
+
+# 2. Check model diagnostics
+summary(mx)
+Anova(mx, type = "II", test = "Chisq")  # Type II tests
+
+# 3. Validate residuals
+sim_res <- simulateResiduals(mx, n = 250)
+plot(sim_res)
+testResiduals(sim_res)
+
+# 1. Test if you need it:
+mx0 <- glmmTMB(Abundance ~ depth * treatment + (1|plot), 
+              data = df2, 
+              beta_family(link = "logit"),
+              control = glmmTMBControl(
+                optCtrl = list(iter.max = 1000, eval.max = 1000)
+              ))
+
+# Likelihood ratio test
+anova(mx0, mx)  # If p < 0.05, include dispformula
+```
+
+
+
+# 3. Final model: m1
+
+
+```{r}
+# 1. Fit model (with singular fit - this is fine!)
+m1 <- glmmTMB(Abundance ~ depth * treatment + (1|plot), 
+              data = df2, 
+              beta_family(link = "logit"),
+              dispformula = ~ depth,  # Variance varies by depth!
+              control = glmmTMBControl(
+                optCtrl = list(iter.max = 1000, eval.max = 1000)
+              ))
+
+# 2. Check model diagnostics
+summary(m1)
+Anova(m1, type = "II", test = "Chisq")  # Type II tests
+
+##########################
+
+##########################
+# 1. Get predictions using ONLY the fixed effects (depth * treatment)
+# re.form = NA drops the random effects from the prediction
+fixed_preds <- predict(m1, type = "response", re.form = NA)
+
+# 2. Get predictions using BOTH fixed and random effects
+full_preds <- predict(m1, type = "response")
+
+# 3. Get your actual raw response data from the model
+raw_data <- m1$frame$Abundance
+
+# 4. Compute manual R2 values
+R2_marginal_manual    <- var(fixed_preds) / var(raw_data)
+R2_conditional_manual <- var(full_preds) / var(raw_data)
+
+# Print results
+print(R2_marginal_manual)
+print(R2_conditional_manual)
+
+#########################
+
+# 3. Validate residuals
+sim_res <- simulateResiduals(m1, n = 250)
+plot(sim_res)
+testResiduals(sim_res)
+
+
+##########################
+
+# Force emmeans to always calculate back-transformed real-scale proportions (0 to 1)
+# while performing pairwise tests safely on the internal logit scale.
+
+library(emmeans)
+library(multcomp)
+
+# =========================================================================
+# 1. INTERACTION POST-HOC 
+# =========================================================================
+
+# Option A: Comparing treatments within each specific depth
+emm_inter_A <- emmeans(m1, ~ treatment | depth, type = "response")
+# Get Letters:
+cld_interaction_A <- as.data.frame(cld(emm_inter_A, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_interaction_A <- as.data.frame(contrast(emm_inter_A, method = "pairwise", adjust = "sidak"))
+
+
+# Option B: Comparing depths within each specific treatment
+emm_inter_B <- emmeans(m1, ~ depth | treatment, type = "response")
+# Get Letters:
+cld_interaction_B <- as.data.frame(cld(emm_inter_B, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_interaction_B <- as.data.frame(contrast(emm_inter_B, method = "pairwise", adjust = "sidak"))
+
+
+# =========================================================================
+# 2. DEPTH MAIN EFFECT POST-HOC 
+# =========================================================================
+
+emm_depth_main <- emmeans(m1, ~ depth, type = "response")
+# Get Letters:
+cld_depth_main <- as.data.frame(cld(emm_depth_main, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_depth_main <- as.data.frame(contrast(emm_depth_main, method = "pairwise", adjust = "sidak"))
+
+
+# =========================================================================
+# 3. TREATMENT MAIN EFFECT POST-HOC 
+# =========================================================================
+
+emm_treatment_main <- emmeans(m1, ~ treatment, type = "response")
+# Get Letters:
+cld_treatment_main <- as.data.frame(cld(emm_treatment_main, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_treatment_main <- as.data.frame(contrast(emm_treatment_main, method = "pairwise", adjust = "sidak"))
+
+
+# =========================================================================
+# 4. Print all outputs to your console
+# =========================================================================
+print("--- Interaction: Treatment within Depth (LETTERS & P-VALUES) ---")
+print(cld_interaction_A)
+print(p_interaction_A)
+
+print("--- Interaction: Depth within Treatment (LETTERS & P-VALUES) ---")
+print(cld_interaction_B)
+print(p_interaction_B)
+
+print("--- Main Effect: Depth (LETTERS & P-VALUES) ---")
+print(cld_depth_main)
+print(p_depth_main)
+
+print("--- Main Effect: Treatment (LETTERS & P-VALUES) ---")
+print(cld_treatment_main)
+print(p_treatment_main)
+
 
 ```
 
+
+
+
+
+# B) CE
+
+```{r}
+levels(FG_df$OTU)
+```
+
+
+```{r}
+taxa <- "CE"
+
+# Construct a data.frame with the selected
+# taxonomic group and grouping
+# relative
+df2 <- filter(FG_df, OTU == taxa)
+```
+
+
+
+
+# 1. Data distribution
+
+```{r}
+# Basic density plot in ggplot2
+ggplot(df2, aes(x = Abundance)) +
+  geom_density()
+```
+
+
+
+
+```{r}
+shapiro.test(df2$Abundance)
+```
+
+
+--> long_tailed (Gamma) distribution
+
+
+
+
+```{r}
+fig <- df2 %>%
+  group_by(treatment, depth_numerical) %>%
+  summarise(
+    mean = mean(Abundance, na.rm = TRUE),
+    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  ungroup() %>%
+  ggplot(aes(
+    y = mean,
+    x = depth_numerical,
+    color = treatment
+  )) +
+  geom_line(position = position_dodge(1.2)) +
+  geom_point(size = 2, position = position_dodge(1.2)) +
+  geom_errorbar(
+    aes(ymin = mean - se, ymax = mean + se),
+    width = 0.3,
+    position = position_dodge(1.2),
+    linetype = "solid",
+    alpha = 0.5
+  ) +
+  coord_flip() +
+  scale_x_reverse() +
+  scale_colour_manual(values = MyPalette) +
+  labs(
+    x = "Soil layer",
+    y = "Proportion",
+    color = "Treatment"
+  ) +
+  theme_cowplot() +
+  theme(
+    axis.text = element_text(size = 18),
+    axis.title = element_text(size = 22, face = "bold"),
+    legend.text = element_text(size = 22),
+    legend.title = element_text(size = 22),
+    plot.title = element_text(size = 22, hjust = 0.5),
+    panel.border = element_rect(colour = "black", fill = NA, size = 0.5),
+    strip.text = element_text(size = 22, face = "bold")
+  ) +
+  scale_x_reverse(
+    breaks = c(60, 35, 25, 15, 5),
+    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
+  ) + theme(legend.title=element_blank())
+
+print(fig)
+```
+
+
+
+# 2. GLMM 
+
+
+
+
+```{r}
+mx <- glmmTMB(Abundance ~ depth * treatment, 
+              data = df2, 
+              beta_family(link = "logit"),
+              dispformula = ~ depth,  # Variance varies by depth!
+              control = glmmTMBControl(
+                optCtrl = list(iter.max = 1000, eval.max = 1000)
+              ))
+
+# 2. Check model diagnostics
+summary(mx)
+Anova(mx, type = "II", test = "Chisq")  # Type II tests
+
+# 3. Validate residuals
+sim_res <- simulateResiduals(mx, n = 250)
+plot(sim_res)
+testResiduals(sim_res)
+
+# 1. Test if you need it:
+mx0 <- glmmTMB(Abundance ~ depth * treatment, 
+              data = df2, 
+              beta_family(link = "logit"),
+              control = glmmTMBControl(
+                optCtrl = list(iter.max = 1000, eval.max = 1000)
+              ))
+
+# Likelihood ratio test
+anova(mx0, mx)  # If p < 0.05, include dispformula
+```
+
+
+
+
+
+
+# 3. Final model: m2
+
+
+```{r}
+# 1. Fit model (with singular fit - this is fine!)
+m2 <- glmmTMB(Abundance ~ depth * treatment + (1|plot), 
+              data = df2, 
+              beta_family(link = "logit"),
+              dispformula = ~ depth,  # Variance varies by depth!
+              control = glmmTMBControl(
+                optCtrl = list(iter.max = 1000, eval.max = 1000)
+              ))
+
+# 2. Check model diagnostics
+summary(m2)
+Anova(m2, type = "II", test = "Chisq")  # Type II tests
+
+##########################
+
+##########################
+# 1. Get predictions using ONLY the fixed effects (depth * treatment)
+# re.form = NA drops the random effects from the prediction
+fixed_preds <- predict(m2, type = "response", re.form = NA)
+
+# 2. Get predictions using BOTH fixed and random effects
+full_preds <- predict(m2, type = "response")
+
+# 3. Get your actual raw response data from the model
+raw_data <- m2$frame$Abundance
+
+# 4. Compute manual R2 values
+R2_marginal_manual    <- var(fixed_preds) / var(raw_data)
+R2_conditional_manual <- var(full_preds) / var(raw_data)
+
+# Print results
+print(R2_marginal_manual)
+print(R2_conditional_manual)
+
+#########################
+
+# 3. Validate residuals
+sim_res <- simulateResiduals(m2, n = 250)
+plot(sim_res)
+testResiduals(sim_res)
+
+
+##########################
+
+# Force emmeans to always calculate back-transformed real-scale proportions (0 to 1)
+# while performing pairwise tests safely on the internal logit scale.
+
+library(emmeans)
+library(multcomp)
+
+# =========================================================================
+# 1. INTERACTION POST-HOC 
+# =========================================================================
+
+# Option A: Comparing treatments within each specific depth
+emm_inter_A <- emmeans(m2, ~ treatment | depth, type = "response")
+# Get Letters:
+cld_interaction_A <- as.data.frame(cld(emm_inter_A, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_interaction_A <- as.data.frame(contrast(emm_inter_A, method = "pairwise", adjust = "sidak"))
+
+
+# Option B: Comparing depths within each specific treatment
+emm_inter_B <- emmeans(m2, ~ depth | treatment, type = "response")
+# Get Letters:
+cld_interaction_B <- as.data.frame(cld(emm_inter_B, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_interaction_B <- as.data.frame(contrast(emm_inter_B, method = "pairwise", adjust = "sidak"))
+
+
+# =========================================================================
+# 2. DEPTH MAIN EFFECT POST-HOC 
+# =========================================================================
+
+emm_depth_main <- emmeans(m2, ~ depth, type = "response")
+# Get Letters:
+cld_depth_main <- as.data.frame(cld(emm_depth_main, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_depth_main <- as.data.frame(contrast(emm_depth_main, method = "pairwise", adjust = "sidak"))
+
+
+# =========================================================================
+# 3. TREATMENT MAIN EFFECT POST-HOC 
+# =========================================================================
+
+emm_treatment_main <- emmeans(m2, ~ treatment, type = "response")
+# Get Letters:
+cld_treatment_main <- as.data.frame(cld(emm_treatment_main, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_treatment_main <- as.data.frame(contrast(emm_treatment_main, method = "pairwise", adjust = "sidak"))
+
+
+# =========================================================================
+# 4. Print all outputs to your console
+# =========================================================================
+print("--- Interaction: Treatment within Depth (LETTERS & P-VALUES) ---")
+print(cld_interaction_A)
+print(p_interaction_A)
+
+print("--- Interaction: Depth within Treatment (LETTERS & P-VALUES) ---")
+print(cld_interaction_B)
+print(p_interaction_B)
+
+print("--- Main Effect: Depth (LETTERS & P-VALUES) ---")
+print(cld_depth_main)
+print(p_depth_main)
+
+print("--- Main Effect: Treatment (LETTERS & P-VALUES) ---")
+print(cld_treatment_main)
+print(p_treatment_main)
+
+
+```
+
+
+
+# C) GH
+
+```{r}
+levels(FG_df$OTU)
+```
+
+
+```{r}
+taxa <- "GH"
+
+# Construct a data.frame with the selected
+# taxonomic group and grouping
+# relative
+df2 <- filter(FG_df, OTU == taxa)
+```
+
+
+
+
+# 1. Data distribution
+
+```{r}
+# Basic density plot in ggplot2
+ggplot(df2, aes(x = Abundance)) +
+  geom_density()
+```
+
+
+
+
+```{r}
+shapiro.test(df2$Abundance)
+```
+
+
+--> left-skewed (beta) to normal distribution
+
+
+
+
+
+```{r}
+fig <- df2 %>%
+  group_by(treatment, depth_numerical) %>%
+  summarise(
+    mean = mean(Abundance, na.rm = TRUE),
+    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  ungroup() %>%
+  ggplot(aes(
+    y = mean,
+    x = depth_numerical,
+    color = treatment
+  )) +
+  geom_line(position = position_dodge(1.2)) +
+  geom_point(size = 2, position = position_dodge(1.2)) +
+  geom_errorbar(
+    aes(ymin = mean - se, ymax = mean + se),
+    width = 0.3,
+    position = position_dodge(1.2),
+    linetype = "solid",
+    alpha = 0.5
+  ) +
+  coord_flip() +
+  scale_x_reverse() +
+  scale_colour_manual(values = MyPalette) +
+  labs(
+    x = "Soil layer",
+    y = "Proportion",
+    color = "Treatment"
+  ) +
+  theme_cowplot() +
+  theme(
+    axis.text = element_text(size = 18),
+    axis.title = element_text(size = 22, face = "bold"),
+    legend.text = element_text(size = 22),
+    legend.title = element_text(size = 22),
+    plot.title = element_text(size = 22, hjust = 0.5),
+    panel.border = element_rect(colour = "black", fill = NA, size = 0.5),
+    strip.text = element_text(size = 22, face = "bold")
+  ) +
+  scale_x_reverse(
+    breaks = c(60, 35, 25, 15, 5),
+    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
+  ) + theme(legend.title=element_blank())
+
+print(fig)
+```
+
+
+
+# 2. GLMM 
+
+
+
+
+```{r}
+mx <- glmmTMB(Abundance ~ depth * treatment + (1|plot), 
+              data = df2, 
+              beta_family(link = "logit"),
+              dispformula = ~ depth,  # Variance varies by depth!
+              control = glmmTMBControl(
+                optCtrl = list(iter.max = 1000, eval.max = 1000)
+              ))
+
+# 2. Check model diagnostics
+summary(mx)
+Anova(mx, type = "II", test = "Chisq")  # Type II tests
+
+# 3. Validate residuals
+sim_res <- simulateResiduals(mx, n = 250)
+plot(sim_res)
+testResiduals(sim_res)
+
+# 1. Test if you need it:
+mx0 <- glmmTMB(Abundance ~ depth * treatment + (1|plot), 
+              data = df2, 
+              beta_family(link = "logit"),
+              control = glmmTMBControl(
+                optCtrl = list(iter.max = 1000, eval.max = 1000)
+              ))
+
+# Likelihood ratio test
+anova(mx0, mx)  # If p < 0.05, include dispformula
+```
+
+
+
+
+
+
+
+# 3. Final model: m3
+
+
+
+```{r}
+# 1. Fit model (with singular fit - this is fine!)
+m3 <- glmmTMB(Abundance ~ depth * treatment + (1|plot), 
+              data = df2, 
+              beta_family(link = "logit"),
+              dispformula = ~ depth,  # Variance varies by depth!
+              control = glmmTMBControl(
+                optCtrl = list(iter.max = 1000, eval.max = 1000)
+              ))
+
+# 2. Check model diagnostics
+summary(m3)
+Anova(m3, type = "II", test = "Chisq")  # Type II tests
+
+##########################
+
+##########################
+# 1. Get predictions using ONLY the fixed effects (depth * treatment)
+# re.form = NA drops the random effects from the prediction
+fixed_preds <- predict(m3, type = "response", re.form = NA)
+
+# 2. Get predictions using BOTH fixed and random effects
+full_preds <- predict(m3, type = "response")
+
+# 3. Get your actual raw response data from the model
+raw_data <- m3$frame$Abundance
+
+# 4. Compute manual R2 values
+R2_marginal_manual    <- var(fixed_preds) / var(raw_data)
+R2_conditional_manual <- var(full_preds) / var(raw_data)
+
+# Print results
+print(R2_marginal_manual)
+print(R2_conditional_manual)
+
+#########################
+
+# 3. Validate residuals
+sim_res <- simulateResiduals(m3, n = 250)
+plot(sim_res)
+testResiduals(sim_res)
+
+
+##########################
+
+# Force emmeans to always calculate back-transformed real-scale proportions (0 to 1)
+# while performing pairwise tests safely on the internal logit scale.
+
+library(emmeans)
+library(multcomp)
+
+# =========================================================================
+# 1. INTERACTION POST-HOC 
+# =========================================================================
+
+# Option A: Comparing treatments within each specific depth
+emm_inter_A <- emmeans(m3, ~ treatment | depth, type = "response")
+# Get Letters:
+cld_interaction_A <- as.data.frame(cld(emm_inter_A, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_interaction_A <- as.data.frame(contrast(emm_inter_A, method = "pairwise", adjust = "sidak"))
+
+
+# Option B: Comparing depths within each specific treatment
+emm_inter_B <- emmeans(m3, ~ depth | treatment, type = "response")
+# Get Letters:
+cld_interaction_B <- as.data.frame(cld(emm_inter_B, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_interaction_B <- as.data.frame(contrast(emm_inter_B, method = "pairwise", adjust = "sidak"))
+
+
+# =========================================================================
+# 2. DEPTH MAIN EFFECT POST-HOC 
+# =========================================================================
+
+emm_depth_main <- emmeans(m3, ~ depth, type = "response")
+# Get Letters:
+cld_depth_main <- as.data.frame(cld(emm_depth_main, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_depth_main <- as.data.frame(contrast(emm_depth_main, method = "pairwise", adjust = "sidak"))
+
+
+# =========================================================================
+# 3. TREATMENT MAIN EFFECT POST-HOC 
+# =========================================================================
+
+emm_treatment_main <- emmeans(m3, ~ treatment, type = "response")
+# Get Letters:
+cld_treatment_main <- as.data.frame(cld(emm_treatment_main, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_treatment_main <- as.data.frame(contrast(emm_treatment_main, method = "pairwise", adjust = "sidak"))
+
+
+# =========================================================================
+# 4. Print all outputs to your console
+# =========================================================================
+print("--- Interaction: Treatment within Depth (LETTERS & P-VALUES) ---")
+print(cld_interaction_A)
+print(p_interaction_A)
+
+print("--- Interaction: Depth within Treatment (LETTERS & P-VALUES) ---")
+print(cld_interaction_B)
+print(p_interaction_B)
+
+print("--- Main Effect: Depth (LETTERS & P-VALUES) ---")
+print(cld_depth_main)
+print(p_depth_main)
+
+print("--- Main Effect: Treatment (LETTERS & P-VALUES) ---")
+print(cld_treatment_main)
+print(p_treatment_main)
+
+
+```
+
+
+
+
+# C) GT
+
+```{r}
+levels(FG_df$OTU)
+```
+
+
+```{r}
+taxa <- "GT"
+
+# Construct a data.frame with the selected
+# taxonomic group and grouping
+# relative
+df2 <- filter(FG_df, OTU == taxa)
+```
+
+
+
+
+# 1. Data distribution
+
+```{r}
+# Basic density plot in ggplot2
+ggplot(df2, aes(x = Abundance)) +
+  geom_density()
+```
+
+
+
+
+```{r}
+shapiro.test(df2$Abundance)
+```
+
+
+--> normal to moderate tailed (right-skewed) distribution
+
+
+
+
+```{r}
+fig <- df2 %>%
+  group_by(treatment, depth_numerical) %>%
+  summarise(
+    mean = mean(Abundance, na.rm = TRUE),
+    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  ungroup() %>%
+  ggplot(aes(
+    y = mean,
+    x = depth_numerical,
+    color = treatment
+  )) +
+  geom_line(position = position_dodge(1.2)) +
+  geom_point(size = 2, position = position_dodge(1.2)) +
+  geom_errorbar(
+    aes(ymin = mean - se, ymax = mean + se),
+    width = 0.3,
+    position = position_dodge(1.2),
+    linetype = "solid",
+    alpha = 0.5
+  ) +
+  coord_flip() +
+  scale_x_reverse() +
+  scale_colour_manual(values = MyPalette) +
+  labs(
+    x = "Soil layer",
+    y = "Proportion",
+    color = "Treatment"
+  ) +
+  theme_cowplot() +
+  theme(
+    axis.text = element_text(size = 18),
+    axis.title = element_text(size = 22, face = "bold"),
+    legend.text = element_text(size = 22),
+    legend.title = element_text(size = 22),
+    plot.title = element_text(size = 22, hjust = 0.5),
+    panel.border = element_rect(colour = "black", fill = NA, size = 0.5),
+    strip.text = element_text(size = 22, face = "bold")
+  ) +
+  scale_x_reverse(
+    breaks = c(60, 35, 25, 15, 5),
+    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
+  ) + theme(legend.title=element_blank())
+
+print(fig)
+```
+
+
+
+# 2. GLMM 
+
+
+
+
+```{r}
+mx <- glmmTMB(Abundance ~ depth * treatment + (1|plot), 
+              data = df2, 
+              beta_family(link = "logit"),
+              dispformula = ~ depth,  # Variance varies by depth!
+              control = glmmTMBControl(
+                optCtrl = list(iter.max = 1000, eval.max = 1000)
+              ))
+
+# 2. Check model diagnostics
+summary(mx)
+Anova(mx, type = "II", test = "Chisq")  # Type II tests
+
+# 3. Validate residuals
+sim_res <- simulateResiduals(mx, n = 250)
+plot(sim_res)
+testResiduals(sim_res)
+
+# 1. Test if you need it:
+mx0 <- glmmTMB(Abundance ~ depth * treatment + (1|plot), 
+              data = df2, 
+              beta_family(link = "logit"),
+              control = glmmTMBControl(
+                optCtrl = list(iter.max = 1000, eval.max = 1000)
+              ))
+
+# Likelihood ratio test
+anova(mx0, mx)  # If p < 0.05, include dispformula
+```
+
+
+
+
+
+
+
+# 3. Final model: m4
+
+
+```{r}
+# 1. Fit model (with singular fit - this is fine!)
+m4 <- glmmTMB(Abundance ~ depth * treatment + (1|plot), 
+              data = df2, 
+              beta_family(link = "logit"),
+              dispformula = ~ depth,  # Variance varies by depth!
+              control = glmmTMBControl(
+                optCtrl = list(iter.max = 1000, eval.max = 1000)
+              ))
+
+# 2. Check model diagnostics
+summary(m4)
+Anova(m4, type = "II", test = "Chisq")  # Type II tests
+
+##########################
+
+##########################
+# 1. Get predictions using ONLY the fixed effects (depth * treatment)
+# re.form = NA drops the random effects from the prediction
+fixed_preds <- predict(m4, type = "response", re.form = NA)
+
+# 2. Get predictions using BOTH fixed and random effects
+full_preds <- predict(m4, type = "response")
+
+# 3. Get your actual raw response data from the model
+raw_data <- m4$frame$Abundance
+
+# 4. Compute manual R2 values
+R2_marginal_manual    <- var(fixed_preds) / var(raw_data)
+R2_conditional_manual <- var(full_preds) / var(raw_data)
+
+# Print results
+print(R2_marginal_manual)
+print(R2_conditional_manual)
+
+#########################
+
+# 3. Validate residuals
+sim_res <- simulateResiduals(m4, n = 250)
+plot(sim_res)
+testResiduals(sim_res)
+
+
+##########################
+
+# Force emmeans to always calculate back-transformed real-scale proportions (0 to 1)
+# while performing pairwise tests safely on the internal logit scale.
+
+library(emmeans)
+library(multcomp)
+
+# =========================================================================
+# 1. INTERACTION POST-HOC 
+# =========================================================================
+
+# Option A: Comparing treatments within each specific depth
+emm_inter_A <- emmeans(m4, ~ treatment | depth, type = "response")
+# Get Letters:
+cld_interaction_A <- as.data.frame(cld(emm_inter_A, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_interaction_A <- as.data.frame(contrast(emm_inter_A, method = "pairwise", adjust = "sidak"))
+
+
+# Option B: Comparing depths within each specific treatment
+emm_inter_B <- emmeans(m4, ~ depth | treatment, type = "response")
+# Get Letters:
+cld_interaction_B <- as.data.frame(cld(emm_inter_B, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_interaction_B <- as.data.frame(contrast(emm_inter_B, method = "pairwise", adjust = "sidak"))
+
+
+# =========================================================================
+# 2. DEPTH MAIN EFFECT POST-HOC 
+# =========================================================================
+
+emm_depth_main <- emmeans(m4, ~ depth, type = "response")
+# Get Letters:
+cld_depth_main <- as.data.frame(cld(emm_depth_main, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_depth_main <- as.data.frame(contrast(emm_depth_main, method = "pairwise", adjust = "sidak"))
+
+
+# =========================================================================
+# 3. TREATMENT MAIN EFFECT POST-HOC 
+# =========================================================================
+
+emm_treatment_main <- emmeans(m4, ~ treatment, type = "response")
+# Get Letters:
+cld_treatment_main <- as.data.frame(cld(emm_treatment_main, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_treatment_main <- as.data.frame(contrast(emm_treatment_main, method = "pairwise", adjust = "sidak"))
+
+
+# =========================================================================
+# 4. Print all outputs to your console
+# =========================================================================
+print("--- Interaction: Treatment within Depth (LETTERS & P-VALUES) ---")
+print(cld_interaction_A)
+print(p_interaction_A)
+
+print("--- Interaction: Depth within Treatment (LETTERS & P-VALUES) ---")
+print(cld_interaction_B)
+print(p_interaction_B)
+
+print("--- Main Effect: Depth (LETTERS & P-VALUES) ---")
+print(cld_depth_main)
+print(p_depth_main)
+
+print("--- Main Effect: Treatment (LETTERS & P-VALUES) ---")
+print(cld_treatment_main)
+print(p_treatment_main)
+
+
+```
+
+
+
+
+# D) PL
+
+```{r}
+levels(FG_df$OTU)
+```
+
+
+```{r}
+taxa <- "PL"
+
+# Construct a data.frame with the selected
+# taxonomic group and grouping
+# relative
+df2 <- filter(FG_df, OTU == taxa)
+```
+
+
+
+
+# 1. Data distribution
+
+```{r}
+# Basic density plot in ggplot2
+ggplot(df2, aes(x = Abundance)) +
+  geom_density()
+```
+
+
+
+
+```{r}
+shapiro.test(df2$Abundance)
+```
+
+
+--> right-skewed (gamma) distribution
+
+
+
+
+
+```{r}
+fig <- df2 %>%
+  group_by(treatment, depth_numerical) %>%
+  summarise(
+    mean = mean(Abundance, na.rm = TRUE),
+    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
+  ) %>%
+  ungroup() %>%
+  ggplot(aes(
+    y = mean,
+    x = depth_numerical,
+    color = treatment
+  )) +
+  geom_line(position = position_dodge(1.2)) +
+  geom_point(size = 2, position = position_dodge(1.2)) +
+  geom_errorbar(
+    aes(ymin = mean - se, ymax = mean + se),
+    width = 0.3,
+    position = position_dodge(1.2),
+    linetype = "solid",
+    alpha = 0.5
+  ) +
+  coord_flip() +
+  scale_x_reverse() +
+  scale_colour_manual(values = MyPalette) +
+  labs(
+    x = "Soil layer",
+    y = "Proportion",
+    color = "Treatment"
+  ) +
+  theme_cowplot() +
+  theme(
+    axis.text = element_text(size = 18),
+    axis.title = element_text(size = 22, face = "bold"),
+    legend.text = element_text(size = 22),
+    legend.title = element_text(size = 22),
+    plot.title = element_text(size = 22, hjust = 0.5),
+    panel.border = element_rect(colour = "black", fill = NA, size = 0.5),
+    strip.text = element_text(size = 22, face = "bold")
+  ) +
+  scale_x_reverse(
+    breaks = c(60, 35, 25, 15, 5),
+    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
+  ) + theme(legend.title=element_blank())
+
+print(fig)
+```
+
+
+
+# 2. GLMM 
+
+
+
+
+```{r}
+mx <- glmmTMB(Abundance ~ depth * treatment + (1|plot), 
+              data = df2, 
+              ordbeta(link = "logit"),
+              dispformula = ~ depth,  # Variance varies by depth!
+              control = glmmTMBControl(
+                optCtrl = list(iter.max = 1000, eval.max = 1000)
+              ))
+
+# 2. Check model diagnostics
+summary(mx)
+Anova(mx, type = "II", test = "Chisq")  # Type II tests
+
+# 3. Validate residuals
+sim_res <- simulateResiduals(mx, n = 250)
+plot(sim_res)
+testResiduals(sim_res)
+
+# 1. Test if you need it:
+mx0 <- glmmTMB(Abundance ~ depth * treatment + (1|plot), 
+              data = df2, 
+              ordbeta(link = "logit"),
+              control = glmmTMBControl(
+                optCtrl = list(iter.max = 1000, eval.max = 1000)
+              ))
+
+# Likelihood ratio test
+anova(mx0, mx)  # If p < 0.05, include dispformula
+```
+
+
+
+
+
+
+# 3. Final model: m5
+
+
+
+```{r}
+# 1. Fit model (with singular fit - this is fine!)
+m5 <- glmmTMB(Abundance ~ depth * treatment + (1|plot), 
+              data = df2, 
+              ordbeta(link = "logit"),
+              dispformula = ~ depth,  # Variance varies by depth!
+              control = glmmTMBControl(
+                optCtrl = list(iter.max = 1000, eval.max = 1000)
+              ))
+
+
+# 2. Check model diagnostics
+summary(m5)
+Anova(m5, type = "II", test = "Chisq")  # Type II tests
+
+##########################
+
+##########################
+# 1. Get predictions using ONLY the fixed effects (depth * treatment)
+# re.form = NA drops the random effects from the prediction
+fixed_preds <- predict(m5, type = "response", re.form = NA)
+
+# 2. Get predictions using BOTH fixed and random effects
+full_preds <- predict(m5, type = "response")
+
+# 3. Get your actual raw response data from the model
+raw_data <- m5$frame$Abundance
+
+# 4. Compute manual R2 values
+R2_marginal_manual    <- var(fixed_preds) / var(raw_data)
+R2_conditional_manual <- var(full_preds) / var(raw_data)
+
+# Print results
+print(R2_marginal_manual)
+print(R2_conditional_manual)
+
+#########################
+
+# 3. Validate residuals
+sim_res <- simulateResiduals(m5, n = 250)
+plot(sim_res)
+testResiduals(sim_res)
+
+
+##########################
+
+# Force emmeans to always calculate back-transformed real-scale proportions (0 to 1)
+# while performing pairwise tests safely on the internal logit scale.
+
+library(emmeans)
+library(multcomp)
+
+# =========================================================================
+# 1. INTERACTION POST-HOC 
+# =========================================================================
+
+# Option A: Comparing treatments within each specific depth
+emm_inter_A <- emmeans(m5, ~ treatment | depth, type = "response")
+# Get Letters:
+cld_interaction_A <- as.data.frame(cld(emm_inter_A, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_interaction_A <- as.data.frame(contrast(emm_inter_A, method = "pairwise", adjust = "sidak"))
+
+
+# Option B: Comparing depths within each specific treatment
+emm_inter_B <- emmeans(m5, ~ depth | treatment, type = "response")
+# Get Letters:
+cld_interaction_B <- as.data.frame(cld(emm_inter_B, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_interaction_B <- as.data.frame(contrast(emm_inter_B, method = "pairwise", adjust = "sidak"))
+
+
+# =========================================================================
+# 2. DEPTH MAIN EFFECT POST-HOC 
+# =========================================================================
+
+emm_depth_main <- emmeans(m5, ~ depth, type = "response")
+# Get Letters:
+cld_depth_main <- as.data.frame(cld(emm_depth_main, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_depth_main <- as.data.frame(contrast(emm_depth_main, method = "pairwise", adjust = "sidak"))
+
+
+# =========================================================================
+# 3. TREATMENT MAIN EFFECT POST-HOC 
+# =========================================================================
+
+emm_treatment_main <- emmeans(m5, ~ treatment, type = "response")
+# Get Letters:
+cld_treatment_main <- as.data.frame(cld(emm_treatment_main, adjust = "sidak", Letters = letters, reversed = TRUE))
+# Get P-values:
+p_treatment_main <- as.data.frame(contrast(emm_treatment_main, method = "pairwise", adjust = "sidak"))
+
+
+# =========================================================================
+# 4. Print all outputs to your console
+# =========================================================================
+print("--- Interaction: Treatment within Depth (LETTERS & P-VALUES) ---")
+print(cld_interaction_A)
+print(p_interaction_A)
+
+print("--- Interaction: Depth within Treatment (LETTERS & P-VALUES) ---")
+print(cld_interaction_B)
+print(p_interaction_B)
+
+print("--- Main Effect: Depth (LETTERS & P-VALUES) ---")
+print(cld_depth_main)
+print(p_depth_main)
+
+print("--- Main Effect: Treatment (LETTERS & P-VALUES) ---")
+print(cld_treatment_main)
+print(p_treatment_main)
+
+
+```
+
+
+# P VALUE CORRECTION!!
+
+Collect P-Values from All Metabolism level Models
+
+For each interaction and main effect, you should apply FDR correction separately because:
+
+Interactions and main effects are testing different hypotheses
+
+Treatment:Depth interaction tests are different from Depth:Treatment (they're the same interaction but presented differently)
+
+Each main effect (depth and treatment) tests different things
+
+
+
+```{r}
+
+# ============================================
+# LIST YOUR MODELS (metabolism level)
+# ============================================
+
+model_names <- paste0("m", 1:5)
+
+# Create a list of models (only if they exist)
+models <- list()
+for (name in model_names) {
+  if (exists(name)) {
+    models[[name]] <- get(name)
+  } else {
+    warning(paste("Model", name, "not found"))
+  }
+}
+
+# ============================================
+# EXTRACT ALL RAW P-VALUES WITH GROUP INFO
+# ============================================
+
+all_raw_p <- c()
+all_term_info <- c()
+all_model_info <- c()
+all_test_info <- c()
+all_group_info <- c()  # NEW: Track which group each test belongs to
+
+for (model_name in names(models)) {
+  model <- models[[model_name]]
+  
+  # Get Anova table based on model type
+  if (inherits(model, "glmmTMB")) {
+    anova_table <- as.data.frame(car::Anova(model, type = "II", test = "Chisq"))
+    raw_p <- anova_table[, "Pr(>Chisq)"]
+    test_type <- "Chisq"
+  } else if (inherits(model, "lmerMod")) {
+    anova_table <- as.data.frame(car::Anova(model, type = "II", test = "F"))
+    raw_p <- anova_table[, "Pr(>F)"]
+    test_type <- "F"
+  } else {
+    warning(paste("Model", model_name, "not recognized"))
+    next
+  }
+  
+  terms <- rownames(anova_table)
+  
+  # Assign groups based on term type
+  for (i in 1:length(terms)) {
+    term <- terms[i]
+    
+    # Determine group
+    if (grepl(":", term)) {
+      # Interaction terms
+      if (grepl("depth.*treatment|treatment.*depth", term)) {
+        group <- "Interaction:Depth_Treatment"
+      } else {
+        group <- "Interaction:Other"
+      }
+    } else if (term == "depth") {
+      group <- "Main:Depth"
+    } else if (term == "treatment") {
+      group <- "Main:Treatment"
+    } else {
+      group <- "Main:Other"
+    }
+    
+    all_group_info <- c(all_group_info, group)
+  }
+  
+  # Store all info
+  all_raw_p <- c(all_raw_p, raw_p)
+  all_term_info <- c(all_term_info, terms)
+  all_model_info <- c(all_model_info, rep(model_name, length(raw_p)))
+  all_test_info <- c(all_test_info, rep(test_type, length(raw_p)))
+}
+
+# ============================================
+# APPLY FDR CORRECTION SEPARATELY BY GROUP
+# ============================================
+
+# Get unique groups
+unique_groups <- unique(all_group_info)
+
+# Initialize FDR p-values vector
+fdr_p <- rep(NA, length(all_raw_p))
+
+# Apply FDR separately to each group
+for (group in unique_groups) {
+  # Get indices for this group
+  group_idx <- which(all_group_info == group)
+  
+  # Get p-values for this group
+  group_p <- all_raw_p[group_idx]
+  n_tests <- length(group_p)
+  
+  if (n_tests > 0) {
+    # Benjamini-Hochberg FDR within this group
+    sorted_idx <- order(group_p)
+    sorted_p <- group_p[sorted_idx]
+    fdr_values <- sorted_p * (n_tests / (1:n_tests))
+    fdr_values <- pmin(fdr_values, 1)  # Cap at 1
+    
+    # Assign back to original order
+    fdr_p[group_idx] <- fdr_values[order(sorted_idx)]
+  }
+}
+
+# ============================================
+# CREATE RESULTS TABLE
+# ============================================
+
+results <- data.frame(
+  Model = all_model_info,
+  Group = all_group_info,
+  Term = all_term_info,
+  Test = all_test_info,
+  Raw_p = all_raw_p,
+  FDR_p = fdr_p,
+  Significant = ifelse(fdr_p < 0.05, "*", "")
+)
+
+# ============================================
+# VIEW RESULTS
+# ============================================
+
+cat("========================================\n")
+cat("FDR CORRECTION BY GROUP\n")
+cat("========================================\n")
+cat("Total models:", length(models), "\n")
+cat("Total tests:", length(all_raw_p), "\n")
+
+cat("\nTests by group:\n")
+for (group in unique_groups) {
+  n <- sum(all_group_info == group)
+  sig <- sum(results$Significant[results$Group == group] == "*")
+  cat("  ", group, ":", n, "tests,", sig, "significant\n")
+}
+
+cat("========================================\n\n")
+
+print(results)
+
+# ============================================
+# SUMMARY BY GROUP
+# ============================================
+
+cat("\n========================================\n")
+cat("DETAILED SUMMARY BY GROUP\n")
+cat("========================================\n")
+
+for (group in unique_groups) {
+  sub <- results[results$Group == group, ]
+  cat("\n", "=== ", group, " ===\n", sep = "")
+  cat("  Total tests:", nrow(sub), "\n")
+  cat("  Significant (FDR < 0.05):", sum(sub$Significant == "*"), "\n")
+  if (sum(sub$Significant == "*") > 0) {
+    cat("  Significant terms:\n")
+    for (i in 1:nrow(sub)) {
+      if (sub$Significant[i] == "*") {
+        cat("    -", sub$Term[i], "(raw p =", 
+            format(sub$Raw_p[i], digits = 4), 
+            ", FDR p =", format(sub$FDR_p[i], digits = 4), ")\n")
+      }
+    }
+  }
+  if (nrow(sub) > 0) {
+    cat("  All terms:\n")
+    for (i in 1:nrow(sub)) {
+      cat("    -", sub$Term[i], ": raw =", 
+          format(sub$Raw_p[i], digits = 4), 
+          ", FDR =", format(sub$FDR_p[i], digits = 4), 
+          sub$Significant[i], "\n")
+    }
+  }
+}
+
+# ============================================
+# SUMMARY BY MODEL WITH GROUP BREAKDOWN
+# ============================================
+
+cat("\n========================================\n")
+cat("SUMMARY BY MODEL\n")
+cat("========================================\n")
+
+for (model_name in unique(results$Model)) {
+  sub <- results[results$Model == model_name, ]
+  cat("\n", model_name, ":\n", sep = "")
+  cat("  Total terms:", nrow(sub), "\n")
+  cat("  Significant:", sum(sub$Significant == "*"), "\n")
+  
+  # Breakdown by group within model
+  for (group in unique(sub$Group)) {
+    sub_group <- sub[sub$Group == group, ]
+    cat("    ", group, ":", 
+        sum(sub_group$Significant == "*"), "/", nrow(sub_group), 
+        " significant\n", sep = "")
+  }
+  
+  if (sum(sub$Significant == "*") > 0) {
+    cat("  Significant terms:", 
+        paste(sub$Term[sub$Significant == "*"], collapse = ", "), "\n")
+  }
+}
+
+# ============================================
+# OPTIONAL: EXPORT RESULTS BY GROUP
+# ============================================
+
+# Save full results
+#write.csv(results, "FDR_results_by_group.csv", row.names = FALSE)
+
+# Save summary by group
+summary_by_group <- data.frame(
+  Group = unique_groups,
+  Total_tests = sapply(unique_groups, function(g) sum(all_group_info == g)),
+  Significant = sapply(unique_groups, function(g) sum(results$Significant[results$Group == g] == "*")),
+  Sig_terms = sapply(unique_groups, function(g) {
+    terms <- results$Term[results$Group == g & results$Significant == "*"]
+    if (length(terms) > 0) paste(terms, collapse = "; ") else ""
+  })
+)
+#write.csv(summary_by_group, "FDR_summary_by_group.csv", row.names = FALSE)
+
+
+```
 
 
 
@@ -1538,2198 +2928,6 @@ SLH
 
 
 
-
-```{r}
-names(gene_data)
-```
-
-
-
-
-
-
-# 9. CAZyme PLant vs Microbial SUBSTRATES
-
-```{r}
-substrates <- read.csv2(file = "C:\\Users\\lehakkin\\RStudio_computer\\CAZyme_Substrates_from_Huan_et_al_2024.csv")
-tax <- as.data.frame(tax_table(ps))
-tax <- left_join(tax, substrates, by=c("enzyme"="CAZyme_family"))
-tax <- as.data.frame(tax)
-tax <- tax[, c(3:5, 1,2)]
-row.names(tax) <- tax$enzyme
-
-tax_table(ps) <- tax_table(as.matrix(tax))
-ps
-rank_names(ps)
-```
-
-## 9.1. Figures
-
-
-Plant and Microbial derived C decomposing
-
-
-
-```{r}
-ps_RA <- transform(ps, "compositional")
-
-ps_x <- aggregate_rare(ps_RA, level = 'Derived', detection = 0/100, prevalence = 0/140)
-ps_x
-
-
-tax <- as.data.frame(tax_table(ps_x))
-
-meta <- meta(ps)
-
-meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
-sample_data(ps_x) <- sample_data(meta)
-
-ps_x
-```
-
-
-
-```{r}
-ps_y <- ps_x
-```
-
-
-
-```{r}
-## get the otu table
-gene_data <- as.data.frame(otu_table(ps_y))
-gene_data <- as.data.frame(t(gene_data))
-
-metadata <- meta(ps_y)
-
-metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
-
-metadata$Layer[metadata$Layer=="40-"] <- "40-80"
-
-
-metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
-metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
-metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
-metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
-metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
-
-metadata$Layer <- as.factor(metadata$Layer)
-levels(metadata$Layer)
-
-metadata$Treatment <- metadata$sample_type
-metadata$Treatment <- as.character(metadata$Treatment)
-
-metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
-metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
-metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
-metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
-
-```
-
-```{r}
-names(gene_data)
-```
-
-
-
-
-
-
-
-```{r}
-my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
-
-#left join
-df <- merge(metadata, gene_data, by=0, all.x=TRUE)
-
-Microbial <- ggplot(df, aes(x = Layer, y = Microbial, fill = Layer)) +
-  geom_boxplot(outlier.shape = NA) +  
-  geom_jitter(
-    aes(fill = Layer),
-    shape = 21,
-    color = "black",
-    stroke = 0.3,
-    width = 0.2,
-    alpha = 0.5,
-    size = 2
-  ) +  
-  scale_fill_manual(values = my_colour) +
-  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
-  labs(x = "", y = "Microbial-derived C\ndecomposing CAZymes") +  
-  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
-  theme_cowplot() +  
-  theme(
-    legend.position = "none",  
-    axis.title.y = element_text(size = 14),  
-    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
-    axis.text.y = element_text(size = 12),
-    axis.title = element_text(face = "bold"),
-    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
-    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
-    panel.spacing = unit(1, "cm")
-  )
-
-Microbial
-
-```
-
-
-```{r}
-names(gene_data)
-```
-
-
-
-
-
-
-
-```{r}
-my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
-
-#left join
-df <- merge(metadata, gene_data, by=0, all.x=TRUE)
-
-Plant <- ggplot(df, aes(x = Layer, y = Plant, fill = Layer)) +
-  geom_boxplot(outlier.shape = NA) +  
-  geom_jitter(
-    aes(fill = Layer),
-    shape = 21,
-    color = "black",
-    stroke = 0.3,
-    width = 0.2,
-    alpha = 0.5,
-    size = 2
-  ) +  
-  scale_fill_manual(values = my_colour) +
-  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
-  labs(x = "", y = "Plant-derived C\ndecomposing CAZymes") +  
-  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
-  theme_cowplot() +  
-  theme(
-    legend.position = "none",  
-    axis.title.y = element_text(size = 14),  
-    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
-    axis.text.y = element_text(size = 12),
-    axis.title = element_text(face = "bold"),
-    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
-    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
-    panel.spacing = unit(1, "cm")
-  )
-
-Plant
-
-```
-
-
-
-## 9.2. Test
-
-
-```{r}
-ps_RA <- transform(ps, "compositional")
-
-ps_x <- aggregate_rare(ps_RA, level = 'Derived', detection = 0/100, prevalence = 0/140)
-ps_x
-
-
-tax <- as.data.frame(tax_table(ps_x))
-
-meta <- meta(ps)
-
-meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
-sample_data(ps_x) <- sample_data(meta)
-
-ps_x
-```
-
-
-Treatment in ecah soil layer separately
-
-
-```{r}
-ps_y <- subset_samples(ps_x, depth=="20...30")
-ps_y
-```
-
-
-```{r}
-library(car)
-
-x_df <- psmelt(ps_y)
-
-taxa <- unique(x_df$OTU)
-
-for (i in taxa) {
- df <- filter(x_df, OTU == i)
- print(i)
- # Using leveneTest()
-result = leveneTest(Abundance ~ sample_type, df)
-# print the result
-print(result)
-
-}
-
-x <- x_df %>%
-  filter(OTU %in% taxa) %>% group_by(OTU, sample_type) %>% summarise(mean = mean(Abundance, na.rm = TRUE), se = (sd(Abundance, na.rm = TRUE)/sqrt(length((Abundance)))))
-print(x)
-
-```
-
-All are homogenic
-
-
-```{r}
-y_df <- psmelt(ps_x)
-x <- y_df %>%
-  group_by(OTU, sample_type, depth) %>% summarise(mean = round(mean(Abundance, na.rm = TRUE)*100,1), se = round((sd(Abundance, na.rm = TRUE)/sqrt(length((Abundance)))) * 100,1))
-x <- subset(x, OTU!="Unknown")
-print(x)
-
-```
-
-
-Parametric test
-
-all the layers:
-
-```{r}
-library(multcomp)
-library(car)
-library(dplyr)
-
-# 1. Create summary table
-y_df <- psmelt(ps_x)
-x <- y_df %>%
-  group_by(OTU, sample_type, depth) %>% 
-  summarise(
-    mean = round(mean(Abundance, na.rm = TRUE) * 100, 1), 
-    se = round((sd(Abundance, na.rm = TRUE) / sqrt(n())) * 100, 1),
-    .groups = 'drop'
-  )
-
-# Remove Unknown OTU
-x <- subset(x, OTU != "Unknown")
-
-# Combine mean and se
-x <- x %>%
-  mutate(mean_se = paste0(mean, " ± ", se)) %>%
-  dplyr::select(-mean, -se)
-
-# 2. Get data for tests
-x_df <- psmelt(ps_x)
-x_df$OTU <- as.factor(x_df$OTU)
-x_df <- subset(x_df, OTU != "Unknown")
-
-# 3. FIRST: Compare sample_type within each depth (lowercase letters)
-cld_lower <- data.frame()
-
-for (j in unique(x_df$OTU)) {
-  for (d in unique(x_df$depth)) {
-    df <- x_df[x_df$OTU == j & x_df$depth == d, ]
-    
-    # Need at least 2 sample types
-    if (length(unique(df$sample_type)) < 2) next
-    
-    tryCatch({
-      res.aov <- aov(Abundance ~ sample_type, data = df)
-      tukey <- glht(res.aov, linfct = mcp(sample_type = "Tukey"))
-      cld_letters <- cld(tukey, level = 0.05)
-      
-      cld_df <- data.frame(
-        OTU = j,
-        depth = d,
-        sample_type = names(cld_letters$mcletters$Letters),
-        cld_lower = gsub(" ", "", cld_letters$mcletters$Letters),
-        stringsAsFactors = FALSE
-      )
-      
-      cld_lower <- rbind(cld_lower, cld_df)
-    }, error = function(e) {
-      # Skip if error
-      message(paste("Error in lowercase for OTU", j, "depth", d, ":", e$message))
-    })
-  }
-}
-
-print(paste("Lowercase comparisons:", nrow(cld_lower), "rows"))
-
-# 4. SECOND: Compare depth within each sample_type (uppercase letters)
-cld_upper <- data.frame()
-
-for (j in unique(x_df$OTU)) {
-  for (st in unique(x_df$sample_type)) {
-    df <- x_df[x_df$OTU == j & x_df$sample_type == st, ]
-    
-    # Need at least 2 depths
-    if (length(unique(df$depth)) < 2) next
-    
-    tryCatch({
-      # Convert depth to factor
-      df$depth_factor <- factor(df$depth, 
-                               levels = c("0...10", "10...20", "20...30", "30...40", "40..."))
-      
-      res.aov <- aov(Abundance ~ depth_factor, data = df)
-      tukey <- glht(res.aov, linfct = mcp(depth_factor = "Tukey"))
-      cld_letters <- cld(tukey, level = 0.05)
-      
-      cld_df <- data.frame(
-        OTU = j,
-        sample_type = st,
-        depth = names(cld_letters$mcletters$Letters),
-        cld_upper = gsub(" ", "", toupper(cld_letters$mcletters$Letters)),
-        stringsAsFactors = FALSE
-      )
-      
-      cld_upper <- rbind(cld_upper, cld_df)
-    }, error = function(e) {
-      # Skip if error
-      message(paste("Error in uppercase for OTU", j, "sample_type", st, ":", e$message))
-    })
-  }
-}
-
-print(paste("Uppercase comparisons:", nrow(cld_upper), "rows"))
-
-# 5. Check if we got results
-print("Preview of cld_lower:")
-print(head(cld_lower))
-print("\nPreview of cld_upper:")
-print(head(cld_upper))
-
-# 6. Merge results
-if (nrow(cld_lower) > 0) {
-  x <- merge(x, cld_lower, by = c("OTU", "depth", "sample_type"), all.x = TRUE)
-} else {
-  x$cld_lower <- NA
-}
-
-if (nrow(cld_upper) > 0) {
-  x <- merge(x, cld_upper, by = c("OTU", "sample_type", "depth"), all.x = TRUE)
-} else {
-  x$cld_upper <- NA
-}
-
-# Replace NA with empty string
-x$cld_lower[is.na(x$cld_lower)] <- ""
-x$cld_upper[is.na(x$cld_upper)] <- ""
-
-# 7. Append letters directly without parentheses
-x <- x %>%
-  mutate(
-    mean_se = case_when(
-      cld_lower != "" & cld_upper != "" ~ paste(mean_se, cld_lower, cld_upper),
-      cld_lower != "" ~ paste(mean_se, cld_lower),
-      cld_upper != "" ~ paste(mean_se, cld_upper),
-      TRUE ~ mean_se
-    )
-  )
-
-# Remove the separate cld columns
-x$cld_lower <- NULL
-x$cld_upper <- NULL
-
-# Arrange for better viewing
-x <- x %>% arrange(OTU, depth, sample_type)
-
-```
-
-
-
-# 10. CAZyme specific ubstrate
-
-
-
-```{r}
-ps_RA <- transform(ps, "compositional")
-
-ps_x <- aggregate_rare(ps_RA, level = 'Substrate', detection = 0/100, prevalence = 0/140)
-ps_x
-
-
-tax <- as.data.frame(tax_table(ps_x))
-
-meta <- meta(ps)
-
-meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
-sample_data(ps_x) <- sample_data(meta)
-
-ps_x
-```
-
-
-
-```{r}
-ps_y <- ps_x
-```
-
-
-
-```{r}
-## get the otu table
-gene_data <- as.data.frame(otu_table(ps_y))
-gene_data <- as.data.frame(t(gene_data))
-
-metadata <- meta(ps_y)
-
-metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
-
-metadata$Layer[metadata$Layer=="40-"] <- "40-80"
-
-
-metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
-metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
-metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
-metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
-metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
-
-metadata$Layer <- as.factor(metadata$Layer)
-levels(metadata$Layer)
-
-metadata$Treatment <- metadata$sample_type
-metadata$Treatment <- as.character(metadata$Treatment)
-
-metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
-metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
-metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
-metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
-
-```
-
-```{r}
-names(gene_data)
-```
-
-
-
-
-
-
-
-```{r}
-my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
-
-#left join
-df <- merge(metadata, gene_data, by=0, all.x=TRUE)
-
-Peptidoglycan <- ggplot(df, aes(x = Layer, y = Peptidoglycan, fill = Layer)) +
-  geom_boxplot(outlier.shape = NA) +  
-  geom_jitter(
-    aes(fill = Layer),
-    shape = 21,
-    color = "black",
-    stroke = 0.3,
-    width = 0.2,
-    alpha = 0.5,
-    size = 2
-  ) +  
-  scale_fill_manual(values = my_colour) +
-  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
-  labs(x = "", y = "Peptidoglycan-derived C\ndecomposing CAZymes") +  
-  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
-  theme_cowplot() +  
-  theme(
-    legend.position = "none",  
-    axis.title.y = element_text(size = 14),  
-    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
-    axis.text.y = element_text(size = 12),
-    axis.title = element_text(face = "bold"),
-    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
-    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
-    panel.spacing = unit(1, "cm")
-  )
-
-Peptidoglycan
-
-```
-
-
-```{r}
-names(gene_data)
-```
-
-
-
-
-
-
-
-```{r}
-my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
-
-#left join
-df <- merge(metadata, gene_data, by=0, all.x=TRUE)
-
-Chitin <- ggplot(df, aes(x = Layer, y = Chitin, fill = Layer)) +
-  geom_boxplot(outlier.shape = NA) +  
-  geom_jitter(
-    aes(fill = Layer),
-    shape = 21,
-    color = "black",
-    stroke = 0.3,
-    width = 0.2,
-    alpha = 0.5,
-    size = 2
-  ) +  
-  scale_fill_manual(values = my_colour) +
-  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
-  labs(x = "", y = "Chitin-derived C\ndecomposing CAZymes") +  
-  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
-  theme_cowplot() +  
-  theme(
-    legend.position = "none",  
-    axis.title.y = element_text(size = 14),  
-    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
-    axis.text.y = element_text(size = 12),
-    axis.title = element_text(face = "bold"),
-    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
-    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
-    panel.spacing = unit(1, "cm")
-  )
-
-Chitin
-
-```
-
-
-
-```{r}
-names(gene_data)
-```
-
-
-
-
-
-
-
-```{r}
-my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
-
-#left join
-df <- merge(metadata, gene_data, by=0, all.x=TRUE)
-
-Glucans <- ggplot(df, aes(x = Layer, y = Glucans, fill = Layer)) +
-  geom_boxplot(outlier.shape = NA) +  
-  geom_jitter(
-    aes(fill = Layer),
-    shape = 21,
-    color = "black",
-    stroke = 0.3,
-    width = 0.2,
-    alpha = 0.5,
-    size = 2
-  ) +  
-  scale_fill_manual(values = my_colour) +
-  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
-  labs(x = "", y = "Glucans-derived C\ndecomposing CAZymes") +  
-  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
-  theme_cowplot() +  
-  theme(
-    legend.position = "none",  
-    axis.title.y = element_text(size = 14),  
-    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
-    axis.text.y = element_text(size = 12),
-    axis.title = element_text(face = "bold"),
-    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
-    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
-    panel.spacing = unit(1, "cm")
-  )
-
-Glucans
-
-```
-
-
-
-```{r}
-names(gene_data)
-```
-
-
-
-
-
-
-
-```{r}
-my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
-
-#left join
-df <- merge(metadata, gene_data, by=0, all.x=TRUE)
-
-Cellulose <- ggplot(df, aes(x = Layer, y = Cellulose, fill = Layer)) +
-  geom_boxplot(outlier.shape = NA) +  
-  geom_jitter(
-    aes(fill = Layer),
-    shape = 21,
-    color = "black",
-    stroke = 0.3,
-    width = 0.2,
-    alpha = 0.5,
-    size = 2
-  ) +  
-  scale_fill_manual(values = my_colour) +
-  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
-  labs(x = "", y = "Cellulose-derived C\ndecomposing CAZymes") +  
-  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
-  theme_cowplot() +  
-  theme(
-    legend.position = "none",  
-    axis.title.y = element_text(size = 14),  
-    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
-    axis.text.y = element_text(size = 12),
-    axis.title = element_text(face = "bold"),
-    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
-    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
-    panel.spacing = unit(1, "cm")
-  )
-
-Cellulose
-
-```
-
-
-
-```{r}
-names(gene_data)
-```
-
-
-
-
-
-
-
-```{r}
-my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
-
-#left join
-df <- merge(metadata, gene_data, by=0, all.x=TRUE)
-
-Hemicellulose <- ggplot(df, aes(x = Layer, y = Hemicellulose, fill = Layer)) +
-  geom_boxplot(outlier.shape = NA) +  
-  geom_jitter(
-    aes(fill = Layer),
-    shape = 21,
-    color = "black",
-    stroke = 0.3,
-    width = 0.2,
-    alpha = 0.5,
-    size = 2
-  ) +  
-  scale_fill_manual(values = my_colour) +
-  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
-  labs(x = "", y = "Hemicellulose-derived C\ndecomposing CAZymes") +  
-  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
-  theme_cowplot() +  
-  theme(
-    legend.position = "none",  
-    axis.title.y = element_text(size = 14),  
-    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
-    axis.text.y = element_text(size = 12),
-    axis.title = element_text(face = "bold"),
-    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
-    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
-    panel.spacing = unit(1, "cm")
-  )
-
-Hemicellulose
-
-```
-
-
-
-
-```{r}
-names(gene_data)
-```
-
-
-
-
-
-
-
-```{r}
-my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
-
-#left join
-df <- merge(metadata, gene_data, by=0, all.x=TRUE)
-
-Lignin <- ggplot(df, aes(x = Layer, y = Lignin, fill = Layer)) +
-  geom_boxplot(outlier.shape = NA) +  
-  geom_jitter(
-    aes(fill = Layer),
-    shape = 21,
-    color = "black",
-    stroke = 0.3,
-    width = 0.2,
-    alpha = 0.5,
-    size = 2
-  ) +  
-  scale_fill_manual(values = my_colour) +
-  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
-  labs(x = "", y = "Lignin-derived C\ndecomposing CAZymes") +  
-  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
-  theme_cowplot() +  
-  theme(
-    legend.position = "none",  
-    axis.title.y = element_text(size = 14),  
-    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
-    axis.text.y = element_text(size = 12),
-    axis.title = element_text(face = "bold"),
-    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
-    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
-    panel.spacing = unit(1, "cm")
-  )
-
-Lignin
-
-```
-
-
-
-
-# 11. Carbon target decomposing: fungi, bacteria, plant
-
-
-
-```{r}
-ps_RA <- transform(ps, "compositional")
-
-ps_x <- aggregate_rare(ps_RA, level = 'C_target', detection = 0/100, prevalence = 0/140)
-ps_x
-
-
-tax <- as.data.frame(tax_table(ps_x))
-
-meta <- meta(ps)
-
-meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
-sample_data(ps_x) <- sample_data(meta)
-
-ps_x
-```
-
-
-
-```{r}
-ps_y <- ps_x
-```
-
-
-
-```{r}
-## get the otu table
-gene_data <- as.data.frame(otu_table(ps_y))
-gene_data <- as.data.frame(t(gene_data))
-
-metadata <- meta(ps_y)
-
-metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
-
-metadata$Layer[metadata$Layer=="40-"] <- "40-80"
-
-
-metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
-metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
-metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
-metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
-metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
-
-metadata$Layer <- as.factor(metadata$Layer)
-levels(metadata$Layer)
-
-metadata$Treatment <- metadata$sample_type
-metadata$Treatment <- as.character(metadata$Treatment)
-
-metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
-metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
-metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
-metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
-
-```
-
-```{r}
-names(gene_data)
-```
-
-
-
-
-
-
-
-```{r}
-my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
-
-#left join
-df <- merge(metadata, gene_data, by=0, all.x=TRUE)
-
-bacteria <- ggplot(df, aes(x = Layer, y = bacteria, fill = Layer)) +
-  geom_boxplot(outlier.shape = NA) +  
-  geom_jitter(
-    aes(fill = Layer),
-    shape = 21,
-    color = "black",
-    stroke = 0.3,
-    width = 0.2,
-    alpha = 0.5,
-    size = 2
-  ) +  
-  scale_fill_manual(values = my_colour) +
-  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
-  labs(x = "", y = "bacteria") +  
-  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
-  theme_cowplot() +  
-  theme(
-    legend.position = "none",  
-    axis.title.y = element_text(size = 14),  
-    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
-    axis.text.y = element_text(size = 12),
-    axis.title = element_text(face = "bold"),
-    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
-    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
-    panel.spacing = unit(1, "cm")
-  )
-
-bacteria
-
-```
-
-
-```{r}
-names(gene_data)
-```
-
-
-
-
-
-
-
-```{r}
-my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
-
-#left join
-df <- merge(metadata, gene_data, by=0, all.x=TRUE)
-
-fungi <- ggplot(df, aes(x = Layer, y = fungi, fill = Layer)) +
-  geom_boxplot(outlier.shape = NA) +  
-  geom_jitter(
-    aes(fill = Layer),
-    shape = 21,
-    color = "black",
-    stroke = 0.3,
-    width = 0.2,
-    alpha = 0.5,
-    size = 2
-  ) +  
-  scale_fill_manual(values = my_colour) +
-  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
-  labs(x = "", y = "fungi") +  
-  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
-  theme_cowplot() +  
-  theme(
-    legend.position = "none",  
-    axis.title.y = element_text(size = 14),  
-    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
-    axis.text.y = element_text(size = 12),
-    axis.title = element_text(face = "bold"),
-    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
-    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
-    panel.spacing = unit(1, "cm")
-  )
-
-fungi
-
-```
-
-
-
-
-```{r}
-names(gene_data)
-```
-
-
-
-
-
-
-
-```{r}
-my_colour <-  c('0-10 cm' = "#387212", '10-20 cm' = "#ADC476", '20-30 cm' = "#D8D2BA",'30-40 cm' = "#907852", '40-80 cm' = "#6A4C3A")
-
-#left join
-df <- merge(metadata, gene_data, by=0, all.x=TRUE)
-
-plant <- ggplot(df, aes(x = Layer, y = plant, fill = Layer)) +
-  geom_boxplot(outlier.shape = NA) +  
-  geom_jitter(
-    aes(fill = Layer),
-    shape = 21,
-    color = "black",
-    stroke = 0.3,
-    width = 0.2,
-    alpha = 0.5,
-    size = 2
-  ) +  
-  scale_fill_manual(values = my_colour) +
-  stat_summary(fun = "mean", geom = "point", shape = 15, size = 3, color = "black") +  
-  labs(x = "", y = "plant") +  
-  facet_grid(. ~ sample_type, scales = "free_x", space = "free_x") +  # Facet by sample_type
-  theme_cowplot() +  
-  theme(
-    legend.position = "none",  
-    axis.title.y = element_text(size = 14),  
-    axis.text.x = element_text(size = 12, angle = 45, hjust = 1),  # Rotate x-axis labels
-    axis.text.y = element_text(size = 12),
-    axis.title = element_text(face = "bold"),
-    strip.background = element_rect(fill = "gray90"),  # Background for facet labels
-    strip.text = element_text(face = "bold", size = 12),  # Style for facet labels
-    panel.spacing = unit(1, "cm")
-  )
-
-plant
-```
-
-
-
-
-## 11.1. Test
-
-
-```{r}
-ps_RA <- transform(ps, "compositional")
-
-ps_x <- aggregate_rare(ps_RA, level = 'C_target', detection = 0/100, prevalence = 0/140)
-ps_x
-
-
-tax <- as.data.frame(tax_table(ps_x))
-
-meta <- meta(ps)
-
-meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
-sample_data(ps_x) <- sample_data(meta)
-
-ps_x
-```
-
-
-
-
-```{r}
-ps_y <- subset_samples(ps_x, depth=="30...40")
-ps_y
-```
-
-
-```{r}
-library(car)
-
-x_df <- psmelt(ps_y)
-
-taxa <- unique(x_df$OTU)
-
-for (i in taxa) {
- df <- filter(x_df, OTU == i)
- print(i)
- # Using leveneTest()
-result = leveneTest(Abundance ~ sample_type, df)
-# print the result
-print(result)
-
-}
-
-x <- x_df %>%
-  filter(OTU %in% taxa) %>% group_by(OTU, sample_type) %>% summarise(mean = mean(Abundance, na.rm = TRUE), se = (sd(Abundance, na.rm = TRUE)/sqrt(length((Abundance)))))
-print(x)
-
-```
-
-all are homogenous
-
-```{r}
-y_df <- psmelt(ps_x)
-x <- y_df %>%
-  group_by(OTU, sample_type, depth) %>% summarise(mean = round(mean(Abundance, na.rm = TRUE)*100,1), se = round((sd(Abundance, na.rm = TRUE)/sqrt(length((Abundance)))) * 100,1))
-x <- subset(x, OTU!="Unknown")
-print(x)
-
-```
-
-
-Parametric test
-
-
-
-
-```{r}
-library(multcomp)
-library(car)
-library(dplyr)
-
-# 1. Create summary table
-y_df <- psmelt(ps_x)
-x <- y_df %>%
-  group_by(OTU, sample_type, depth) %>% 
-  summarise(
-    mean = round(mean(Abundance, na.rm = TRUE) * 100, 1), 
-    se = round((sd(Abundance, na.rm = TRUE) / sqrt(n())) * 100, 1),
-    .groups = 'drop'
-  )
-
-# Remove Unknown OTU
-x <- subset(x, OTU != "Unknown")
-
-# Combine mean and se
-x <- x %>%
-  mutate(mean_se = paste0(mean, " ± ", se)) %>%
-  dplyr::select(-mean, -se)
-
-# 2. Get data for tests
-x_df <- psmelt(ps_x)
-x_df$OTU <- as.factor(x_df$OTU)
-x_df <- subset(x_df, OTU != "Unknown")
-
-# 3. FIRST: Compare sample_type within each depth (lowercase letters)
-cld_lower <- data.frame()
-
-for (j in unique(x_df$OTU)) {
-  for (d in unique(x_df$depth)) {
-    df <- x_df[x_df$OTU == j & x_df$depth == d, ]
-    
-    # Need at least 2 sample types
-    if (length(unique(df$sample_type)) < 2) next
-    
-    tryCatch({
-      res.aov <- aov(Abundance ~ sample_type, data = df)
-      tukey <- glht(res.aov, linfct = mcp(sample_type = "Tukey"))
-      cld_letters <- cld(tukey, level = 0.05)
-      
-      cld_df <- data.frame(
-        OTU = j,
-        depth = d,
-        sample_type = names(cld_letters$mcletters$Letters),
-        cld_lower = gsub(" ", "", cld_letters$mcletters$Letters),
-        stringsAsFactors = FALSE
-      )
-      
-      cld_lower <- rbind(cld_lower, cld_df)
-    }, error = function(e) {
-      # Skip if error
-      message(paste("Error in lowercase for OTU", j, "depth", d, ":", e$message))
-    })
-  }
-}
-
-print(paste("Lowercase comparisons:", nrow(cld_lower), "rows"))
-
-# 4. SECOND: Compare depth within each sample_type (uppercase letters)
-cld_upper <- data.frame()
-
-for (j in unique(x_df$OTU)) {
-  for (st in unique(x_df$sample_type)) {
-    df <- x_df[x_df$OTU == j & x_df$sample_type == st, ]
-    
-    # Need at least 2 depths
-    if (length(unique(df$depth)) < 2) next
-    
-    tryCatch({
-      # Convert depth to factor
-      df$depth_factor <- factor(df$depth, 
-                               levels = c("0...10", "10...20", "20...30", "30...40", "40..."))
-      
-      res.aov <- aov(Abundance ~ depth_factor, data = df)
-      tukey <- glht(res.aov, linfct = mcp(depth_factor = "Tukey"))
-      cld_letters <- cld(tukey, level = 0.05)
-      
-      cld_df <- data.frame(
-        OTU = j,
-        sample_type = st,
-        depth = names(cld_letters$mcletters$Letters),
-        cld_upper = gsub(" ", "", toupper(cld_letters$mcletters$Letters)),
-        stringsAsFactors = FALSE
-      )
-      
-      cld_upper <- rbind(cld_upper, cld_df)
-    }, error = function(e) {
-      # Skip if error
-      message(paste("Error in uppercase for OTU", j, "sample_type", st, ":", e$message))
-    })
-  }
-}
-
-print(paste("Uppercase comparisons:", nrow(cld_upper), "rows"))
-
-# 5. Check if we got results
-print("Preview of cld_lower:")
-print(head(cld_lower))
-print("\nPreview of cld_upper:")
-print(head(cld_upper))
-
-# 6. Merge results
-if (nrow(cld_lower) > 0) {
-  x <- merge(x, cld_lower, by = c("OTU", "depth", "sample_type"), all.x = TRUE)
-} else {
-  x$cld_lower <- NA
-}
-
-if (nrow(cld_upper) > 0) {
-  x <- merge(x, cld_upper, by = c("OTU", "sample_type", "depth"), all.x = TRUE)
-} else {
-  x$cld_upper <- NA
-}
-
-# Replace NA with empty string
-x$cld_lower[is.na(x$cld_lower)] <- ""
-x$cld_upper[is.na(x$cld_upper)] <- ""
-
-# 7. Append letters directly without parentheses
-x <- x %>%
-  mutate(
-    mean_se = case_when(
-      cld_lower != "" & cld_upper != "" ~ paste(mean_se, cld_lower, cld_upper),
-      cld_lower != "" ~ paste(mean_se, cld_lower),
-      cld_upper != "" ~ paste(mean_se, cld_upper),
-      TRUE ~ mean_se
-    )
-  )
-
-# Remove the separate cld columns
-x$cld_lower <- NULL
-x$cld_upper <- NULL
-
-# Arrange for better viewing
-x <- x %>% arrange(OTU, depth, sample_type)
-
-```
-
-
-
-
-# 12. LINEAR MODEL
-
-
-```{r}
-ps_RA <- transform(ps, "compositional")
-
-ps_x <- aggregate_rare(ps_RA, level = 'Derived', detection = 0/100, prevalence = 0/140)
-ps_x
-
-
-tax <- as.data.frame(tax_table(ps_x))
-
-meta <- meta(ps)
-
-meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
-sample_data(ps_x) <- sample_data(meta)
-
-ps_x
-```
-
-
-```{r}
-y_df <- psmelt(ps_x)
-y_df <- y_df[, (c("OTU", "Abundance", "sampleID"))]
-df <- y_df %>% 
-  pivot_wider(
-    names_from = OTU, 
-    values_from = Abundance,
-    values_fill = 0  # Optional: fill missing values with 0
-  )
-meta <- meta(ps_x)
-meta <- left_join(meta, df, by="sampleID")
-names(meta)
-```
-
-Complete analysis WITH TYPE ii ANOVA
-
-
-without forest
-
-```{r}
-library(lmtest)
-library(sandwich)
-library(car)
-library(effectsize)
-library(performance)
-
-meta_nf <- subset(meta, sample_type!="forest")
-# 1. Main analysis with effect sizes
-m1 <- lm(C_g_per_kg ~ depth + Plant, meta_nf)
-summary(m1)
-aov_t2 <- Anova(m1, type = "II")
-effects <- eta_squared(aov_t2, partial = TRUE)
-print(effects)
-
-# Key diagnostics to report:
-check_normality(m1)
-check_heteroscedasticity(m1)
-check_outliers(m1)
-
-# 2. Robustness check
-robust_anova <- Anova(m1, type = "II", vcov = vcovHC(m1, type = "HC3"))
-robust_coef <- coeftest(m1, vcov = vcovHC(m1, type = "HC3"))
-
-# 3. Compare
-print(robust_anova)
-print(robust_coef)
-```
-
-
-
-# 13. Alternative figures
-
-Plant and Microbial derived C decomposing
-
-
-
-```{r}
-ps_RA <- transform(ps, "compositional")
-
-ps_x <- aggregate_rare(ps_RA, level = 'Derived', detection = 0/100, prevalence = 0/140)
-ps_x
-
-
-tax <- as.data.frame(tax_table(ps_x))
-
-meta <- meta(ps)
-
-meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
-sample_data(ps_x) <- sample_data(meta)
-
-ps_x
-```
-
-
-
-```{r}
-ps_y <- ps_x
-```
-
-
-
-```{r}
-## get the otu table
-gene_data <- as.data.frame(otu_table(ps_y))
-gene_data <- as.data.frame(t(gene_data))
-
-metadata <- meta(ps_y)
-
-metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
-
-metadata$Layer[metadata$Layer=="40-"] <- "40-80"
-
-
-metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
-metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
-metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
-metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
-metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
-
-metadata$Layer <- as.factor(metadata$Layer)
-levels(metadata$Layer)
-
-metadata$Treatment <- metadata$sample_type
-metadata$Treatment <- as.character(metadata$Treatment)
-
-metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
-metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
-metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
-metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
-
-```
-
-```{r}
-names(gene_data)
-```
-
-
-```{r}
-# create your own color palette for sample types
-MyPalette <- c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c")
-```
-
-
-Reshape df
-
-```{r}
-df <- merge(metadata, gene_data, by=0, all.x=TRUE)
-
-df$plant_microbe_ratio <- df$Plant / df$Microbial
-df$plant_minus_microbe <- df$Plant - df$Microbial
-
-df_long <- df %>%
-  pivot_longer(
-    cols = c(Microbial, Plant),  # Columns to combine
-    names_to = "Derived",  # New column for GH/GT
-    values_to = "Proportion"  # New column for values
-  )
-```
-
-
-
-
-
-
-```{r}
-fig <- df_long %>%
-  group_by(sample_type, depth_numerical, Derived) %>%
-  summarise(
-    mean = mean(Proportion, na.rm = TRUE),
-    se = sd(Proportion, na.rm = TRUE) / sqrt(n())
-  ) %>%
-  ungroup() %>%
-  ggplot(aes(
-    y = mean,
-    x = depth_numerical,
-    color = sample_type
-  )) +
-  geom_line(position = position_dodge(1.2)) +
-  geom_point(size = 2, position = position_dodge(1.2)) +
-  geom_errorbar(
-    aes(ymin = mean - se, ymax = mean + se),
-    width = 0.3,
-    position = position_dodge(1.2),
-    linetype = "solid",
-    alpha = 0.5
-  ) +
-  coord_flip() +
-  scale_x_reverse() +
-  facet_wrap(~ Derived, 
-             scales = "free_x",
-             labeller = labeller(Derived = c(
-               "Microbial" = "Microbial-derived C\ndecomposing CAZymes",
-               "Plant" = "Plant-derived C\ndecomposing CAZymes"
-             ))) +
-  scale_colour_manual(values = MyPalette) +
-  labs(
-    x = "Soil layer",
-    y = "Proportion",
-    color = "Treatment"
-  ) +
-  theme_cowplot() +
-  theme(
-    axis.text = element_text(size = 14),
-    axis.title = element_text(size = 16, face = "bold"),
-    legend.text = element_text(size = 16),
-    legend.title=element_text(size = 16),
-    plot.title = element_text(size = 16, hjust = 0.5),
-    panel.border = element_rect(colour = "black", fill = NA, size = 0.5),
-    strip.text = element_text(size = 16)
-  ) +
-  scale_x_reverse(
-    breaks = c(60, 35, 25, 15, 5),
-    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
-  )
-
-print(fig)
-```
-
-
-
-
-
-
-C target decomposing
-
-
-
-```{r}
-ps_RA <- transform(ps, "compositional")
-
-ps_x <- aggregate_rare(ps_RA, level = 'C_target', detection = 0/100, prevalence = 0/140)
-ps_x
-
-
-tax <- as.data.frame(tax_table(ps_x))
-
-meta <- meta(ps)
-
-meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
-sample_data(ps_x) <- sample_data(meta)
-
-ps_x
-```
-
-
-
-```{r}
-ps_y <- ps_x
-```
-
-
-
-```{r}
-## get the otu table
-gene_data <- as.data.frame(otu_table(ps_y))
-gene_data <- as.data.frame(t(gene_data))
-
-metadata <- meta(ps_y)
-
-metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
-
-metadata$Layer[metadata$Layer=="40-"] <- "40-80"
-
-
-metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
-metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
-metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
-metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
-metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
-
-metadata$Layer <- as.factor(metadata$Layer)
-levels(metadata$Layer)
-
-metadata$Treatment <- metadata$sample_type
-metadata$Treatment <- as.character(metadata$Treatment)
-
-metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
-metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
-metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
-metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
-
-```
-
-```{r}
-names(gene_data)
-```
-
-
-```{r}
-# create your own color palette for sample types
-MyPalette <- c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c")
-```
-
-
-Reshape df
-
-```{r}
-df <- merge(metadata, gene_data, by=0, all.x=TRUE)
-
-df_long <- df %>%
-  pivot_longer(
-    cols = c(bacteria, fungi, plant),  # Columns to combine
-    names_to = "Derived",  # New column for GH/GT
-    values_to = "Proportion"  # New column for values
-  )
-```
-
-
-
-
-
-
-```{r}
-fig <- df_long %>%
-  group_by(sample_type, depth_numerical, Derived) %>%
-  summarise(
-    mean = mean(Proportion, na.rm = TRUE),
-    se = sd(Proportion, na.rm = TRUE) / sqrt(n())
-  ) %>%
-  ungroup() %>%
-  ggplot(aes(
-    y = mean,
-    x = depth_numerical,
-    color = sample_type
-  )) +
-  geom_line(position = position_dodge(1.2)) +
-  geom_point(size = 2, position = position_dodge(1.2)) +
-  geom_errorbar(
-    aes(ymin = mean - se, ymax = mean + se),
-    width = 0.3,
-    position = position_dodge(1.2),
-    linetype = "solid",
-    alpha = 0.5
-  ) +
-  coord_flip() +
-  scale_x_reverse() +
-  facet_wrap(~ Derived, 
-             scales = "free_x",
-             labeller = labeller(Derived = c(
-               "bacteria" = "Bacterial-derived C",
-               "fungi" = "Fungi-derived C", 
-               "plant" = "Plant-derived C"
-             ))) +
-  scale_colour_manual(values = MyPalette) +
-  labs(
-    x = "Soil layer",
-    y = "Proportion",
-    color = "Treatment"
-  ) +
-  theme_cowplot() +
-  theme(
-    axis.text = element_text(size = 14),
-    axis.title = element_text(size = 14),
-    legend.text = element_text(size = 14),
-    legend.title = element_text(size = 14),
-    plot.title = element_text(size = 18, hjust = 0.5),
-    panel.border = element_rect(colour = "black", fill = NA, size = 0.5),
-    strip.text = element_text(size = 12)
-  ) +
-  scale_x_reverse(
-    breaks = c(60, 35, 25, 15, 5),
-    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
-  )
-
-print(fig)
-```
-
-
-
-
-
-
-
-
-
-Plant and Microbial derived C decomposing
-
-
-
-```{r}
-ps_RA <- transform(ps, "compositional")
-
-ps_x <- aggregate_rare(ps_RA, level = 'Substrate', detection = 0/100, prevalence = 0/140)
-ps_x
-
-
-tax <- as.data.frame(tax_table(ps_x))
-
-meta <- meta(ps)
-
-meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
-sample_data(ps_x) <- sample_data(meta)
-
-ps_x
-```
-
-
-
-```{r}
-ps_y <- ps_x
-```
-
-
-
-```{r}
-## get the otu table
-gene_data <- as.data.frame(otu_table(ps_y))
-gene_data <- as.data.frame(t(gene_data))
-
-metadata <- meta(ps_y)
-
-metadata$Layer <- gsub("...", "-", metadata$depth, fixed = TRUE)
-
-metadata$Layer[metadata$Layer=="40-"] <- "40-80"
-
-
-metadata$Layer[metadata$Layer=="0-10"] <- "0-10 cm"
-metadata$Layer[metadata$Layer=="10-20"] <- "10-20 cm"
-metadata$Layer[metadata$Layer=="20-30"] <- "20-30 cm"
-metadata$Layer[metadata$Layer=="30-40"] <- "30-40 cm"
-metadata$Layer[metadata$Layer=="40-80"] <- "40-80 cm"
-
-metadata$Layer <- as.factor(metadata$Layer)
-levels(metadata$Layer)
-
-metadata$Treatment <- metadata$sample_type
-metadata$Treatment <- as.character(metadata$Treatment)
-
-metadata$Treatment[metadata$Treatment=="forest"] <- "Forest"
-metadata$Treatment[metadata$Treatment=="meadow"] <- "Meadow"
-metadata$Treatment[metadata$Treatment=="organic"] <- "Organic"
-metadata$Treatment[metadata$Treatment=="conventional"] <- "Conventional"
-
-```
-
-```{r}
-names(gene_data)
-```
-
-
-```{r}
-# create your own color palette for sample types
-MyPalette <- c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c")
-```
-
-
-Reshape df
-
-```{r}
-df <- merge(metadata, gene_data, by=0, all.x=TRUE)
-
-
-df_long <- df %>%
-  pivot_longer(
-    cols = c(Peptidoglycan, Chitin, Glucans, Cellulose, Hemicellulose, Lignin),  # Columns to combine
-    names_to = "Substrate",  # New column for GH/GT
-    values_to = "Proportion"  # New column for values
-  )
-```
-
-
-
-
-
-
-
-
-
-```{r}
-df_long$Substrate <- factor(df_long$Substrate, levels = c("Lignin", "Hemicellulose", "Cellulose", "Peptidoglycan", "Chitin", "Glucans"))
-
-fig <- df_long %>%
-  group_by(sample_type, depth_numerical, Substrate) %>%
-  summarise(
-    mean = mean(Proportion, na.rm = TRUE),
-    se = sd(Proportion, na.rm = TRUE) / sqrt(n())
-  ) %>%
-  ungroup() %>%
-  ggplot(aes(
-    y = mean,
-    x = depth_numerical,
-    color = sample_type
-  )) +
-  geom_line(position = position_dodge(1.2)) +
-  geom_point(size = 2, position = position_dodge(1.2)) +
-  geom_errorbar(
-    aes(ymin = mean - se, ymax = mean + se),
-    width = 0.3,
-    position = position_dodge(1.2),
-    linetype = "solid",
-    alpha = 0.5
-  ) +
-  coord_flip() +
-  scale_x_reverse() +
-  facet_wrap(~ Substrate, 
-             scales = "free_x",
-             labeller = labeller(Substrate = c(
-               "Peptidoglycan" = "Peptidoglycan (bacterial)",
-               "Chitin" = "Chitin (fungal)",
-               "Glucans" = "Glucans (fungal)"
-             ))) +
-  scale_colour_manual(values = MyPalette) +
-  labs(
-    x = "Soil layer",
-    y = "Proportion of CAZyme genes targeting different C fractions",
-    color = "Treatment"
-  ) +
-  theme_cowplot() +
-  theme(
-    legend.position = "top",
-    legend.title = element_blank(),    # This now overrides cowplot
-    legend.justification = "center",  # This centers the legend
-    axis.text = element_text(size = 16),
-    axis.title = element_text(size = 20, face = "bold"),
-    legend.text = element_text(size = 20),
-    plot.title = element_text(size = 20, hjust = 0.5),
-    panel.border = element_rect(colour = "black", fill = NA, size = 0.5),
-    strip.text = element_text(size = 20)
-  ) +
-  scale_x_reverse(
-    breaks = c(60, 35, 25, 15, 5),
-    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
-  )
-
-print(fig)
-```
-
-
-
-
-
-CAZyme family figures
-
-```{r}
-# create your own color palette for sample types
-MyPalette <- c(forest = "#1167b1", meadow = "#fbc02d", organic = "#8a8a8a", conventional =  "#b71c1c")
-```
-
-
-```{r}
-ps_RA <- transform(ps, "compositional")
-
-ps_x <- aggregate_rare(ps_RA, level = 'family', detection = 0/100, prevalence = 0/140)# change the level accordingly: "Derived"   "C_target"  "Substrate" "family"    "enzyme"
-ps_x
-
-
-tax <- as.data.frame(tax_table(ps_x))
-
-meta <- meta(ps)
-
-meta$sample_type <- factor(meta$sample_type, levels = c("forest", "meadow", "organic", "conventional"))
-sample_data(ps_x) <- sample_data(meta)
-
-ps_x
-
-df <- psmelt(ps_x)
-```
-
-
-GT
-
-
-```{r}
-GT <- df %>%
-  filter(OTU %in% c("GT")) %>%
-  group_by(sample_type, depth_numerical, OTU) %>%
-  summarise(
-    mean = mean(Abundance, na.rm = TRUE),
-    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
-  ) %>%
-  ungroup() %>%
-  ggplot(aes(
-    y = mean,
-    x = depth_numerical,
-    color = sample_type
-  )) +
-  geom_line(position = position_dodge(1.2)) +
-  geom_point(size = 2, position = position_dodge(1.2)) +
-  geom_errorbar(
-    aes(ymin = mean - se, ymax = mean + se),
-    width = 0.3,
-    position = position_dodge(1.2),
-    linetype = "solid",
-    alpha = 0.5
-  ) +
-  coord_flip() +
-  scale_x_reverse() +
-  scale_colour_manual(values = MyPalette) +
-  labs(
-    x = "Soil layer",
-    y = "GT",
-    color = NULL  # Remove legend title
-  ) +
-  theme_cowplot() +
-  theme(
-    axis.text = element_text(size = 14),
-    axis.title = element_text(size = 14, face = "bold"),  # Bold axis titles only
-    legend.text = element_text(size = 14),  # No bold for legend text
-    legend.title = element_blank(),  # Remove legend title (alternative method)
-    plot.title = element_text(size = 18, hjust = 0.5),
-    panel.border = element_rect(colour = "black", fill = NA, size = 0.5)
-  ) +
-  scale_x_reverse(
-    breaks = c(60, 35, 25, 15, 5),
-    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
-  ) +
-  guides(color = guide_legend(override.aes = list(shape = 15)))
-
-print(GT)
-```
-
-
-
-
-GH
-
-
-```{r}
-GH <- df %>%
-  filter(OTU %in% c("GH")) %>%
-  group_by(sample_type, depth_numerical, OTU) %>%
-  summarise(
-    mean = mean(Abundance, na.rm = TRUE),
-    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
-  ) %>%
-  ungroup() %>%
-  ggplot(aes(
-    y = mean,
-    x = depth_numerical,
-    color = sample_type
-  )) +
-  geom_line(position = position_dodge(1.2)) +
-  geom_point(size = 2, position = position_dodge(1.2)) +
-  geom_errorbar(
-    aes(ymin = mean - se, ymax = mean + se),
-    width = 0.3,
-    position = position_dodge(1.2),
-    linetype = "solid",
-    alpha = 0.5
-  ) +
-  coord_flip() +
-  scale_x_reverse() +
-  scale_colour_manual(values = MyPalette) +
-  labs(
-    x = "Soil layer",
-    y = "GH",
-    color = NULL  # Remove legend title
-  ) +
-  theme_cowplot() +
-  theme(
-    axis.text = element_text(size = 14),
-    axis.title = element_text(size = 14, face = "bold"),  # Bold axis titles only
-    legend.text = element_text(size = 14),  # No bold for legend text
-    legend.title = element_blank(),  # Remove legend title (alternative method)
-    plot.title = element_text(size = 18, hjust = 0.5),
-    panel.border = element_rect(colour = "black", fill = NA, size = 0.5)
-  ) +
-  scale_x_reverse(
-    breaks = c(60, 35, 25, 15, 5),
-    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
-  ) +
-  guides(color = guide_legend(override.aes = list(shape = 15)))
-
-print(GH)
-```
-
-
-
- AA
-
-
-```{r}
-AA <- df %>%
-  filter(OTU %in% c("AA")) %>%
-  group_by(sample_type, depth_numerical, OTU) %>%
-  summarise(
-    mean = mean(Abundance, na.rm = TRUE),
-    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
-  ) %>%
-  ungroup() %>%
-  ggplot(aes(
-    y = mean,
-    x = depth_numerical,
-    color = sample_type
-  )) +
-  geom_line(position = position_dodge(1.2)) +
-  geom_point(size = 2, shape = 15, position = position_dodge(1.2)) +
-  geom_errorbar(
-    aes(ymin = mean - se, ymax = mean + se),
-    width = 0.3,
-    position = position_dodge(1.2),
-    linetype = "solid",
-    alpha = 0.5
-  ) +
-  coord_flip() +
-  scale_x_reverse() +
-  scale_colour_manual(values = MyPalette) +
-  labs(
-    x = "Soil layer",
-    y = "AA",
-    color = NULL  # Remove legend title
-  ) +
-  theme_cowplot() +
-  theme(
-    axis.text = element_text(size = 14),
-    axis.title = element_text(size = 14, face = "bold"),  # Bold axis titles only
-    legend.text = element_text(size = 14),  # No bold for legend text
-    legend.title = element_blank(),  # Remove legend title (alternative method)
-    plot.title = element_text(size = 18, hjust = 0.5),
-    panel.border = element_rect(colour = "black", fill = NA, size = 0.5)
-  ) +
-  scale_x_reverse(
-    breaks = c(60, 35, 25, 15, 5),
-    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
-  ) +
-  guides(color = guide_legend(override.aes = list(shape = 15)))
-
-print(AA)
-```
-
-
-
-CE
-
-
-```{r}
-CE <- df %>%
-  filter(OTU %in% c("CE")) %>%
-  group_by(sample_type, depth_numerical, OTU) %>%
-  summarise(
-    mean = mean(Abundance, na.rm = TRUE),
-    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
-  ) %>%
-  ungroup() %>%
-  ggplot(aes(
-    y = mean,
-    x = depth_numerical,
-    color = sample_type
-  )) +
-  geom_line(position = position_dodge(1.2)) +
-  geom_point(size = 2, shape = 15, position = position_dodge(1.2)) +
-  geom_errorbar(
-    aes(ymin = mean - se, ymax = mean + se),
-    width = 0.3,
-    position = position_dodge(1.2),
-    linetype = "solid",
-    alpha = 0.5
-  ) +
-  coord_flip() +
-  scale_x_reverse() +
-  scale_colour_manual(values = MyPalette) +
-  labs(
-    x = "Soil layer",
-    y = "CE",
-    color = NULL  # Remove legend title
-  ) +
-  theme_cowplot() +
-  theme(
-    axis.text = element_text(size = 14),
-    axis.title = element_text(size = 14, face = "bold"),  # Bold axis titles only
-    legend.text = element_text(size = 14),  # No bold for legend text
-    legend.title = element_blank(),  # Remove legend title (alternative method)
-    plot.title = element_text(size = 18, hjust = 0.5),
-    panel.border = element_rect(colour = "black", fill = NA, size = 0.5)
-  ) +
-  scale_x_reverse(
-    breaks = c(60, 35, 25, 15, 5),
-    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
-  ) +
-  guides(color = guide_legend(override.aes = list(shape = 15)))
-
-print(CE)
-```
-
-
-
-
- PL
-
-
-```{r}
-PL <- df %>%
-  filter(OTU %in% c("PL")) %>%
-  group_by(sample_type, depth_numerical, OTU) %>%
-  summarise(
-    mean = mean(Abundance, na.rm = TRUE),
-    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
-  ) %>%
-  ungroup() %>%
-  ggplot(aes(
-    y = mean,
-    x = depth_numerical,
-    color = sample_type
-  )) +
-  geom_line(position = position_dodge(1.2)) +
-  geom_point(size = 2, shape = 15, position = position_dodge(1.2)) +
-  geom_errorbar(
-    aes(ymin = mean - se, ymax = mean + se),
-    width = 0.3,
-    position = position_dodge(1.2),
-    linetype = "solid",
-    alpha = 0.5
-  ) +
-  coord_flip() +
-  scale_x_reverse() +
-  scale_colour_manual(values = MyPalette) +
-  labs(
-    x = "Soil layer",
-    y = "PL",
-    color = NULL  # Remove legend title
-  ) +
-  theme_cowplot() +
-  theme(
-    axis.text = element_text(size = 14),
-    axis.title = element_text(size = 14, face = "bold"),  # Bold axis titles only
-    legend.text = element_text(size = 14),  # No bold for legend text
-    legend.title = element_blank(),  # Remove legend title (alternative method)
-    plot.title = element_text(size = 18, hjust = 0.5),
-    panel.border = element_rect(colour = "black", fill = NA, size = 0.5)
-  ) +
-  scale_x_reverse(
-    breaks = c(60, 35, 25, 15, 5),
-    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
-  ) +
-  guides(color = guide_legend(override.aes = list(shape = 15)))
-
-print(PL)
-```
-
-
-CBM
-
-
-```{r}
-CBM <- df %>%
-  filter(OTU %in% c("CBM")) %>%
-  group_by(sample_type, depth_numerical, OTU) %>%
-  summarise(
-    mean = mean(Abundance, na.rm = TRUE),
-    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
-  ) %>%
-  ungroup() %>%
-  ggplot(aes(
-    y = mean,
-    x = depth_numerical,
-    color = sample_type
-  )) +
-  geom_line(position = position_dodge(1.2)) +
-  geom_point(size = 2, position = position_dodge(1.2)) +
-  geom_errorbar(
-    aes(ymin = mean - se, ymax = mean + se),
-    width = 0.3,
-    position = position_dodge(1.2),
-    linetype = "solid",
-    alpha = 0.5
-  ) +
-  coord_flip() +
-  scale_x_reverse() +
-  scale_colour_manual(values = MyPalette) +
-  labs(
-    x = "Soil layer",
-    y = "CBM",
-    color = NULL  # Remove legend title
-  ) +
-  theme_cowplot() +
-  theme(
-    axis.text = element_text(size = 14),
-    axis.title = element_text(size = 14, face = "bold"),  # Bold axis titles only
-    legend.text = element_text(size = 14),  # No bold for legend text
-    legend.title = element_blank(),  # Remove legend title (alternative method)
-    plot.title = element_text(size = 18, hjust = 0.5),
-    panel.border = element_rect(colour = "black", fill = NA, size = 0.5)
-  ) +
-  scale_x_reverse(
-    breaks = c(60, 35, 25, 15, 5),
-    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
-  ) +
-  guides(color = guide_legend(override.aes = list(shape = 15)))
-
-print(CBM)
-```
-
-
-
-
-SLH
-
-
-```{r}
-SLH <- df %>%
-  filter(OTU %in% c("SLH")) %>%
-  group_by(sample_type, depth_numerical, OTU) %>%
-  summarise(
-    mean = mean(Abundance, na.rm = TRUE),
-    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
-  ) %>%
-  ungroup() %>%
-  ggplot(aes(
-    y = mean,
-    x = depth_numerical,
-    color = sample_type
-  )) +
-  geom_line(position = position_dodge(1.2)) +
-  geom_point(size = 2, position = position_dodge(1.2)) +
-  geom_errorbar(
-    aes(ymin = mean - se, ymax = mean + se),
-    width = 0.3,
-    position = position_dodge(1.2),
-    linetype = "solid",
-    alpha = 0.5
-  ) +
-  coord_flip() +
-  scale_x_reverse() +
-  scale_colour_manual(values = MyPalette) +
-  labs(
-    x = "Soil layer",
-    y = "SLH",
-    color = NULL  # Remove legend title
-  ) +
-  theme_cowplot() +
-  theme(
-    axis.text = element_text(size = 14),
-    axis.title = element_text(size = 14, face = "bold"),  # Bold axis titles only
-    legend.text = element_text(size = 14),  # No bold for legend text
-    legend.title = element_blank(),  # Remove legend title (alternative method)
-    plot.title = element_text(size = 18, hjust = 0.5),
-    panel.border = element_rect(colour = "black", fill = NA, size = 0.5)
-  ) +
-  scale_x_reverse(
-    breaks = c(60, 35, 25, 15, 5),
-    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
-  ) +
-  guides(color = guide_legend(override.aes = list(shape = 15)))
-
-print(SLH)
-```
-
-
-
-
-Cohesin
-
-
-```{r}
-Cohesin <- df %>%
-  filter(OTU %in% c("cohesin")) %>%
-  group_by(sample_type, depth_numerical, OTU) %>%
-  summarise(
-    mean = mean(Abundance, na.rm = TRUE),
-    se = sd(Abundance, na.rm = TRUE) / sqrt(n())
-  ) %>%
-  ungroup() %>%
-  ggplot(aes(
-    y = mean,
-    x = depth_numerical,
-    color = sample_type
-  )) +
-  geom_line(position = position_dodge(1.2)) +
-  geom_point(size = 2, position = position_dodge(1.2)) +
-  geom_errorbar(
-    aes(ymin = mean - se, ymax = mean + se),
-    width = 0.3,
-    position = position_dodge(1.2),
-    linetype = "solid",
-    alpha = 0.5
-  ) +
-  coord_flip() +
-  scale_x_reverse() +
-  scale_colour_manual(values = MyPalette) +
-  labs(
-    x = "Soil layer",
-    y = "Cohesin",
-    color = NULL  # Remove legend title
-  ) +
-  theme_cowplot() +
-  theme(
-    axis.text = element_text(size = 14),
-    axis.title = element_text(size = 14, face = "bold"),  # Bold axis titles only
-    legend.text = element_text(size = 14),  # No bold for legend text
-    legend.title = element_blank(),  # Remove legend title (alternative method)
-    plot.title = element_text(size = 18, hjust = 0.5),
-    panel.border = element_rect(colour = "black", fill = NA, size = 0.5)
-  ) +
-  scale_x_reverse(
-    breaks = c(60, 35, 25, 15, 5),
-    labels = c("40-80 cm", "30-40 cm", "20-30 cm", "10-20 cm", "0-10 cm")
-  ) +
-  guides(color = guide_legend(override.aes = list(shape = 15)))
-
-print(Cohesin)
-```
-
-
-
-
-Combine important CAZyme family figures
-
-
-
-```{r}
-
-library(ggpubr)
-
-figure1 <-  ggarrange(GH, GT + rremove("ylab") + rremove("y.text") + rremove("y.ticks"), widths = c(1, 0.80, 0.80), hjust = c(-0.5, 0.5, 0.5),
-                    align = "h", ncol = 3, nrow = 1, common.legend = TRUE, legend = "top")
-
-figure2 <-  ggarrange(AA, CE + rremove("ylab") + rremove("y.text") + rremove("y.ticks"), PL + rremove("ylab") + rremove("y.text") + rremove("y.ticks"),
-                    widths = c(1, 0.80, 0.80), hjust = c(-0.5, 0.5, 0.5),
-                    align = "h", ncol = 3, nrow = 1, legend = "none")
-
-figure <- ggarrange(figure1, figure2,
-                   heights = c(1, 1),
-                    align = "h", ncol = 1, nrow = 2)
-
-#figure <- annotate_figure(figure, left = text_grob("CAZymes decomposing C derived from",size = 14, rot = 90, face = "bold"))
-
-figure
-```
 
 
 
